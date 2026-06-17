@@ -172,23 +172,57 @@ func (c *HTTPClient) Enforce(ctx context.Context, req EnforceRequest) (*EnforceR
 	return &EnforceResponse{Allow: allow}, nil
 }
 
-func (c *HTTPClient) doJSON(req *http.Request, out any) error {
+func (c *HTTPClient) Ping(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.cfg.Endpoint, "/")+"/", nil)
+	if err != nil {
+		return err
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("casdoor http=%d body=%s", resp.StatusCode, string(body))
-	}
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("decode casdoor response: %w body=%s", err, string(body))
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("casdoor health http=%d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (c *HTTPClient) doJSON(req *http.Request, out any) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-req.Context().Done():
+				return req.Context().Err()
+			case <-time.After(time.Duration(attempt) * 150 * time.Millisecond):
+			}
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("casdoor http=%d body=%s", resp.StatusCode, string(body))
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("casdoor http=%d body=%s", resp.StatusCode, string(body))
+		}
+		if err := json.Unmarshal(body, out); err != nil {
+			return fmt.Errorf("decode casdoor response: %w body=%s", err, string(body))
+		}
+		return nil
+	}
+	return lastErr
 }
 
 func parseBoolRaw(data json.RawMessage) (bool, error) {
