@@ -4,7 +4,10 @@
 This wrapper avoids PowerShell/Bash glue for Windows users:
 1. Render project-specific idempotent Casdoor seed SQL.
 2. Optionally back up the target Casdoor database.
-3. Import the generated SQL into MySQL using mysql client or dockerized mysql client.
+3. Import the generated SQL into MySQL using one of these methods:
+   - local mysql client
+   - dockerized mysql client
+   - optional PyMySQL package
 
 It does not embed environment-specific SQL in the repository. Runtime values such as
 client_secret, redirect_uri, database host and password are injected via arguments.
@@ -60,6 +63,9 @@ def parse_args() -> argparse.Namespace:
     # Docker mysql client fallback.
     parser.add_argument("--use-docker", action="store_true", help="Use dockerized mysql client instead of local mysql")
     parser.add_argument("--docker-image", default="mysql:8.0", help="Docker image that contains mysql/mysqldump clients")
+
+    # Pure Python optional fallback.
+    parser.add_argument("--use-pymysql", action="store_true", help="Import with the optional PyMySQL package instead of mysql/docker clients")
 
     return parser.parse_args()
 
@@ -147,7 +153,7 @@ def docker_mount_path(path: Path) -> str:
 
 def import_with_local_mysql(args: argparse.Namespace, cnf: Path, sql: Path) -> None:
     if shutil.which(args.mysql_bin) is None and not Path(args.mysql_bin).exists():
-        raise SystemExit(f"[ERROR] mysql client not found: {args.mysql_bin}. Install MySQL client or use --use-docker.")
+        raise SystemExit(f"[ERROR] mysql client not found: {args.mysql_bin}. Install MySQL client, use --use-docker, use --use-pymysql, or run --seed-only and import on the server.")
 
     if args.backup_before:
         dump_bin = args.mysqldump_bin
@@ -193,11 +199,122 @@ def import_with_docker_mysql(args: argparse.Namespace, cnf: Path, sql: Path) -> 
     ])
 
 
+def iter_sql_statements(sql: Path) -> list[str]:
+    """Split generated seed SQL into statements without requiring mysql CLI.
+
+    The seed generator intentionally emits plain SET/INSERT statements with SQL comments.
+    This parser is conservative enough for that generated SQL and avoids splitting on
+    semicolons inside quoted strings.
+    """
+    text = sql.read_text(encoding="utf-8")
+    statements: list[str] = []
+    buf: list[str] = []
+    in_single = False
+    in_double = False
+    in_line_comment = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+
+        if in_line_comment:
+            if ch in "\r\n":
+                in_line_comment = False
+                buf.append(ch)
+            i += 1
+            continue
+
+        if not in_single and not in_double and ch == "-" and nxt == "-":
+            in_line_comment = True
+            i += 2
+            continue
+
+        if ch == "'" and not in_double:
+            buf.append(ch)
+            if in_single and nxt == "'":
+                buf.append(nxt)
+                i += 2
+                continue
+            if i == 0 or text[i - 1] != "\\":
+                in_single = not in_single
+            i += 1
+            continue
+
+        if ch == '"' and not in_single:
+            buf.append(ch)
+            if i == 0 or text[i - 1] != "\\":
+                in_double = not in_double
+            i += 1
+            continue
+
+        if ch == ";" and not in_single and not in_double:
+            statement = "".join(buf).strip()
+            if statement:
+                statements.append(statement)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
+def import_with_pymysql(args: argparse.Namespace, sql: Path) -> None:
+    if args.backup_before:
+        raise SystemExit("[ERROR] --backup-before requires mysqldump. Use local mysql tools, disable --backup-before, or run --seed-only and back up on the server.")
+
+    try:
+        import pymysql  # type: ignore[import-not-found]
+    except ImportError:
+        raise SystemExit("[ERROR] PyMySQL is not installed. Install it with: python -m pip install PyMySQL")
+
+    password = args.password or os.environ.get("MYSQL_PWD", "")
+    statements = iter_sql_statements(sql)
+    if not statements:
+        raise SystemExit(f"[ERROR] no SQL statements found in {sql}")
+
+    print(f"[INFO] importing {len(statements)} SQL statements with PyMySQL into {args.user}@{args.host}:{args.port}/{args.database}")
+    conn = pymysql.connect(
+        host=args.host,
+        port=args.port,
+        user=args.user,
+        password=password,
+        database=args.database,
+        charset="utf8mb4",
+        autocommit=False,
+    )
+    try:
+        with conn.cursor() as cur:
+            for idx, statement in enumerate(statements, 1):
+                try:
+                    cur.execute(statement)
+                except Exception as exc:  # pragma: no cover - depends on live MySQL
+                    preview = statement.replace("\n", " ")[:240]
+                    raise RuntimeError(f"statement {idx} failed: {preview}") from exc
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def confirm(args: argparse.Namespace) -> None:
     if args.yes:
         return
     print("[WARN] This will import idempotent Casdoor seed data into MySQL.")
     print(f"       target: {args.user}@{args.host}:{args.port}/{args.database}")
+    if args.use_pymysql:
+        print("       method: PyMySQL")
+    elif args.use_docker:
+        print("       method: docker mysql client")
+    else:
+        print("       method: local mysql client")
     value = input("Type 'yes' to continue: ").strip().lower()
     if value != "yes":
         raise SystemExit("[INFO] cancelled")
@@ -205,6 +322,8 @@ def confirm(args: argparse.Namespace) -> None:
 
 def main() -> int:
     args = parse_args()
+    if args.use_docker and args.use_pymysql:
+        raise SystemExit("[ERROR] --use-docker and --use-pymysql cannot be used together")
     assert_identifier("database", args.database, r"[A-Za-z0-9_]+")
     assert_identifier("user", args.user, r"[A-Za-z0-9_.-]+")
     if args.port <= 0 or args.port > 65535:
@@ -220,13 +339,16 @@ def main() -> int:
 
     confirm(args)
 
-    with tempfile.TemporaryDirectory(prefix="aisphere-casdoor-") as d:
-        cnf = Path(d) / "mysql-client.cnf"
-        write_client_cnf(cnf, args)
-        if args.use_docker:
-            import_with_docker_mysql(args, cnf, sql)
-        else:
-            import_with_local_mysql(args, cnf, sql)
+    if args.use_pymysql:
+        import_with_pymysql(args, sql)
+    else:
+        with tempfile.TemporaryDirectory(prefix="aisphere-casdoor-") as d:
+            cnf = Path(d) / "mysql-client.cnf"
+            write_client_cnf(cnf, args)
+            if args.use_docker:
+                import_with_docker_mysql(args, cnf, sql)
+            else:
+                import_with_local_mysql(args, cnf, sql)
 
     print("[OK] Casdoor seed imported")
     if args.env_output:
