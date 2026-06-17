@@ -2,19 +2,56 @@
 
 AI Sphere unified authentication and authorization service.
 
-This repository will provide:
+`aisphere-auth` is the shared AuthN/AuthZ layer for AI Sphere platforms such as SkillHub, AgentRuntime, SQLHub, ModelGateway and Portal.
 
-- `aisphere-auth-service`: centralized login, session, principal and authorization check service.
-- `pkg/aisphereauth`: Go SDK and Gin middleware for AI Sphere services.
-- Casdoor adapter layer for identity, roles and policy enforcement.
+## Current milestone
 
-## First milestone
+This repository now includes the first runnable auth service implementation:
 
-Milestone 0/1 bootstraps the service skeleton:
-
-- Go module
 - Gin HTTP server
-- config loading
-- health and readiness endpoints
-- core domain interfaces for authn/authz/session/casdoor
-- public SDK type placeholders
+- `/healthz` and `/readyz`
+- Casdoor OAuth login URL generation
+- Casdoor callback handling
+- AI Sphere memory session
+- `aisphere_session` HttpOnly cookie
+- `/auth/me`
+- `/auth/logout`
+- `/auth/sessions/introspect`
+- `/authz/check`
+- `/authz/batch-check`
+- public `pkg/aisphereauth` HTTP client and Gin middleware skeleton
+
+## Run locally
+
+```bash
+go mod tidy
+go run ./cmd/server
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:18080/healthz
+```
+
+## Casdoor environment
+
+```bash
+export AISPHERE_CASDOOR_ENDPOINT="http://127.0.0.1:8000"
+export AISPHERE_CASDOOR_OWNER="skillhub"
+export AISPHERE_CASDOOR_APPLICATION="aisphere"
+export AISPHERE_CASDOOR_CLIENT_ID="your-client-id"
+export AISPHERE_CASDOOR_CLIENT_SECRET="your-client-secret"
+export AISPHERE_CASDOOR_REDIRECT_URL="http://127.0.0.1:18080/auth/callback/casdoor"
+export AISPHERE_CASDOOR_PERMISSION_ID="skillhub/platform_permission"
+```
+
+Login test:
+
+```bash
+open 'http://127.0.0.1:18080/auth/login?app=skillhub&redirect=/'
+```
+
+## Design boundary
+
+Casdoor remains the source of users, roles and policies. AI Sphere Auth owns local platform sessions, principal normalization and the reusable service/SDK boundary for business services.
