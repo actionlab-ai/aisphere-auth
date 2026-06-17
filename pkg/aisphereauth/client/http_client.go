@@ -57,8 +57,8 @@ func NewHTTPClient(baseURL string, opts ...HTTPClientOption) *HTTPClient {
 func (c *HTTPClient) Introspect(ctx context.Context, sessionID string, app string) (*aisphereauth.Principal, error) {
 	payload, _ := json.Marshal(map[string]string{"sessionId": sessionID, "app": app})
 	var out struct {
-		Active    bool                       `json:"active"`
-		Principal *aisphereauth.Principal    `json:"principal"`
+		Active    bool                    `json:"active"`
+		Principal *aisphereauth.Principal `json:"principal"`
 	}
 	if err := c.post(ctx, "/auth/sessions/introspect", payload, &out); err != nil {
 		return nil, err
