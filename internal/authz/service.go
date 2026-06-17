@@ -16,12 +16,13 @@ type CheckRequest struct {
 }
 
 type Decision struct {
-	Allow   bool
-	Source  string
-	Reason  string
-	Subject string
-	Object  string
-	Action  string
+	Allow   bool   `json:"allow"`
+	Source  string `json:"source"`
+	Reason  string `json:"reason,omitempty"`
+	Subject string `json:"subject"`
+	Object  string `json:"object"`
+	Action  string `json:"action"`
+	TraceID string `json:"traceId,omitempty"`
 }
 
 type Service interface {
