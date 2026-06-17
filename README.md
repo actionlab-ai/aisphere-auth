@@ -9,6 +9,8 @@ AI Sphere unified authentication and authorization service.
 This repository now includes the first runnable auth service implementation:
 
 - Gin HTTP server
+- Chinese CLI help with Cobra: `aisphere-auth -h`
+- Viper config loading: flags > env > config file > defaults
 - `/healthz` and `/readyz`
 - Casdoor OAuth login URL generation
 - Casdoor callback handling
@@ -24,6 +26,65 @@ This repository now includes the first runnable auth service implementation:
 - public `pkg/aisphereauth` HTTP client and Gin middleware skeleton
 - GitHub Actions CI for `gofmt`, `go vet` and `go test ./...`
 - offline `.run` package builder and installer
+
+## CLI
+
+Show Chinese help:
+
+```bash
+./aisphere-auth -h
+```
+
+Run with config file:
+
+```bash
+./aisphere-auth --config configs/config.yaml
+```
+
+Run with command-line overrides:
+
+```bash
+./aisphere-auth \
+  --config configs/config.yaml \
+  --addr :18080 \
+  --mode release \
+  --session-provider redis \
+  --redis-addrs 127.0.0.1:6379
+```
+
+Check config without starting the server:
+
+```bash
+./aisphere-auth check-config --config configs/config.yaml
+```
+
+Print final merged config with secrets masked:
+
+```bash
+./aisphere-auth --config configs/config.yaml --print-config
+```
+
+Show version:
+
+```bash
+./aisphere-auth version
+```
+
+## Configuration
+
+Config precedence:
+
+```text
+command-line flags > environment variables > config file > defaults
+```
+
+Copy the annotated sample config:
+
+```bash
+cp configs/config.yaml.example configs/config.yaml
+```
+
+The sample file contains Chinese comments for every field, including how to fill Casdoor, Redis, Cookie, Service Token and JWT-related settings.
 
 ## Run locally with memory session
 
