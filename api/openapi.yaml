@@ -1,0 +1,255 @@
+openapi: 3.0.3
+info:
+  title: AI Sphere Auth API
+  version: 0.1.0
+  description: |
+    AI Sphere unified AuthN/AuthZ API. This contract is intended for generating
+    non-Go SDKs for SkillHub, AgentRuntime, SQLHub, ModelGateway and Portal.
+servers:
+  - url: http://127.0.0.1:18080
+security:
+  - serviceToken: []
+paths:
+  /healthz:
+    get:
+      summary: Basic process health check
+      security: []
+      responses:
+        '200':
+          description: OK
+  /livez:
+    get:
+      summary: Liveness check
+      security: []
+      responses:
+        '200':
+          description: Alive
+  /readyz:
+    get:
+      summary: Readiness check with dependency checks
+      security: []
+      responses:
+        '200':
+          description: Ready
+        '503':
+          description: Not ready
+  /auth/login:
+    get:
+      summary: Start Casdoor OAuth login
+      security: []
+      parameters:
+        - name: app
+          in: query
+          schema:
+            type: string
+        - name: redirect
+          in: query
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to Casdoor
+  /auth/callback/casdoor:
+    get:
+      summary: Casdoor OAuth callback
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect after login
+        '401':
+          description: Callback failed
+  /auth/me:
+    get:
+      summary: Get current principal from session cookie
+      security: []
+      responses:
+        '200':
+          description: Current principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Principal'
+        '401':
+          description: Unauthorized
+  /auth/logout:
+    post:
+      summary: Logout current cookie session
+      security: []
+      parameters:
+        - name: global
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: OK
+  /auth/sessions/introspect:
+    post:
+      summary: Introspect a platform session
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntrospectRequest'
+      responses:
+        '200':
+          description: Introspection result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntrospectResponse'
+        '401':
+          description: Missing or invalid service token
+  /authz/check:
+    post:
+      summary: Check one authorization decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckRequest'
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Decision'
+        '401':
+          description: Missing or invalid service token
+        '403':
+          description: Denied or backend error
+  /authz/batch-check:
+    post:
+      summary: Check multiple authorization decisions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                checks:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/CheckRequest'
+      responses:
+        '200':
+          description: Decisions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decisions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Decision'
+components:
+  securitySchemes:
+    serviceToken:
+      type: apiKey
+      in: header
+      name: X-Aisphere-Service-Token
+  schemas:
+    Principal:
+      type: object
+      properties:
+        subjectId:
+          type: string
+        casdoorSubject:
+          type: string
+        username:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        organization:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        groups:
+          type: array
+          items:
+            type: string
+        app:
+          type: string
+        sessionId:
+          type: string
+        tokenId:
+          type: string
+        authProvider:
+          type: string
+        authTimeUnix:
+          type: integer
+          format: int64
+        expiresAtUnix:
+          type: integer
+          format: int64
+    IntrospectRequest:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        app:
+          type: string
+    IntrospectResponse:
+      type: object
+      properties:
+        active:
+          type: boolean
+        inactive_reason:
+          type: string
+        traceId:
+          type: string
+        principal:
+          $ref: '#/components/schemas/Principal'
+    CheckRequest:
+      type: object
+      required:
+        - object
+        - action
+      properties:
+        subject:
+          type: string
+        object:
+          type: string
+        action:
+          type: string
+        app:
+          type: string
+        traceId:
+          type: string
+    Decision:
+      type: object
+      properties:
+        allow:
+          type: boolean
+        source:
+          type: string
+        reason:
+          type: string
+        subject:
+          type: string
+        object:
+          type: string
+        action:
+          type: string
+        traceId:
+          type: string
