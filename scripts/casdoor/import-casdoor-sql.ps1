@@ -12,6 +12,14 @@ param(
   [switch]$BackupBefore,
   [string]$BackupDir = "backups/casdoor",
   [switch]$CreateDatabase,
+  [switch]$AllowDestructive,
+  [switch]$PrepareDump,
+  [ValidateSet("data-only", "full")]
+  [string]$PrepareMode = "data-only",
+  [string]$PreparedSql = "",
+  [string]$PrepareKeywords = "aisphere,skillhub",
+  [switch]$PrepareIncludeUsers,
+  [switch]$PrepareOnly,
   [switch]$DryRun,
   [switch]$Yes
 )
@@ -23,7 +31,10 @@ function Show-Usage {
 Casdoor SQL 自动导入工具（PowerShell）
 
 用途：
-  将已经准备好的 Casdoor SQL 初始化文件导入到现有 Casdoor MySQL 数据库，避免手工在 Casdoor UI 中点模型、权限、角色、策略。
+  将 Casdoor SQL 初始化文件导入到现有 Casdoor MySQL 数据库，避免手工在 Casdoor UI 中点模型、权限、角色、策略。
+
+推荐：
+  对完整 mysqldump 使用 -PrepareDump -PrepareMode data-only，脚本会提取 aisphere/skillhub 相关数据并跳过 token/session/record 等运行态表。
 
 示例：
   powershell -ExecutionPolicy Bypass -File .\scripts\casdoor\import-casdoor-sql.ps1 `
@@ -32,30 +43,82 @@ Casdoor SQL 自动导入工具（PowerShell）
     -Database casdoor `
     -User root `
     -Password 'your-password' `
-    -SqlFile .\deployments\casdoor\sql\aisphere-auth-casdoor.sql `
+    -SqlFile .\casdoor.sql `
+    -PrepareDump `
+    -PrepareMode data-only `
     -BackupBefore `
     -Yes
-
-参数：
-  -HostName       Casdoor MySQL 地址，默认 127.0.0.1
-  -Port           Casdoor MySQL 端口，默认 3306
-  -Database       Casdoor 数据库名，默认 casdoor
-  -User           MySQL 用户，默认 root
-  -Password       MySQL 密码，也可用环境变量 CASDOOR_MYSQL_PASSWORD
-  -SqlFile        要导入的 SQL 文件
-  -MysqlBin       mysql 命令路径，默认 mysql
-  -UseDocker      不依赖本机 mysql 客户端，改用 docker run mysql:8.0 执行导入
-  -DockerImage    -UseDocker 时使用的镜像，默认 mysql:8.0
-  -BackupBefore   导入前先 mysqldump 备份目标数据库
-  -BackupDir      备份目录，默认 backups/casdoor
-  -CreateDatabase 导入前执行 CREATE DATABASE IF NOT EXISTS
-  -DryRun         只打印动作，不导入
-  -Yes            跳过确认
 "@
 }
 
+function Assert-Identifier([string]$Name, [string]$Value, [string]$Pattern) {
+  if ($Value -notmatch $Pattern) {
+    throw "invalid ${Name}: ${Value}"
+  }
+}
+
+Assert-Identifier "database" $Database '^[A-Za-z0-9_]+$'
+Assert-Identifier "user" $User '^[A-Za-z0-9_-]+$'
+Assert-Identifier "port" ([string]$Port) '^[0-9]+$'
+
 if (-not (Test-Path $SqlFile)) {
-  Write-Error "SQL file not found: $SqlFile. Put your exported Casdoor SQL at this path or pass -SqlFile."
+  throw "SQL file not found: $SqlFile. Put your exported Casdoor SQL at this path or pass -SqlFile."
+}
+
+$TempFiles = @()
+function New-ClientCnf {
+  $file = New-TemporaryFile
+  $TempFiles += $file.FullName
+  @"
+[client]
+user=$User
+password=$Password
+host=$HostName
+port=$Port
+protocol=tcp
+"@ | Set-Content -Encoding ascii $file.FullName
+  return $file.FullName
+}
+
+function Cleanup-TempFiles {
+  foreach ($file in $TempFiles) {
+    if ($file -and (Test-Path $file)) {
+      Remove-Item -Force $file -ErrorAction SilentlyContinue
+    }
+  }
+}
+trap { Cleanup-TempFiles; throw }
+
+if ($PrepareDump) {
+  $prepareTool = "scripts/casdoor/prepare-casdoor-sql.py"
+  if (-not (Test-Path $prepareTool)) {
+    throw "prepare tool not found: $prepareTool"
+  }
+  if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command python3 -ErrorAction SilentlyContinue)) {
+    throw "python or python3 is required for -PrepareDump"
+  }
+  $python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+  if ([string]::IsNullOrWhiteSpace($PreparedSql)) {
+    $PreparedSql = Join-Path ([System.IO.Path]::GetTempPath()) ("aisphere-casdoor-prepared-{0}.sql" -f ([System.Guid]::NewGuid().ToString("N")))
+    $TempFiles += $PreparedSql
+  }
+  Write-Host "[INFO] preparing Casdoor SQL: mode=$PrepareMode output=$PreparedSql"
+  $args = @($prepareTool, "--input", $SqlFile, "--output", $PreparedSql, "--mode", $PrepareMode, "--keywords", $PrepareKeywords)
+  if ($PrepareIncludeUsers) { $args += "--include-users" }
+  & $python @args
+  $SqlFile = $PreparedSql
+  if ($PrepareOnly) {
+    Write-Host "[OK] prepare-only completed: $SqlFile"
+    Cleanup-TempFiles
+    exit 0
+  }
+}
+
+if (-not $AllowDestructive) {
+  $sample = Get-Content -Raw $SqlFile
+  if ($sample -match '(?i)(^|\s)(DROP\s+TABLE|CREATE\s+TABLE|DROP\s+DATABASE)') {
+    throw "SQL contains destructive schema statements. Use -PrepareDump -PrepareMode data-only, or pass -AllowDestructive deliberately."
+  }
 }
 
 function Test-CommandExists([string]$Command) {
@@ -71,41 +134,25 @@ if (-not $UseDocker -and -not (Test-CommandExists $MysqlBin)) {
   }
 }
 
+$ClientCnf = New-ClientCnf
+
 function Invoke-MysqlExec([string]$Sql) {
   if ($DryRun) { return }
   if ($UseDocker) {
-    if ([string]::IsNullOrEmpty($Password)) {
-      docker run --rm -i $DockerImage mysql --protocol=tcp -h $HostName -P $Port -u $User -e $Sql
-    } else {
-      docker run --rm -i $DockerImage mysql --protocol=tcp -h $HostName -P $Port -u $User "-p$Password" -e $Sql
-    }
+    $mount = "${ClientCnf}:/tmp/client.cnf:ro"
+    $Sql | docker run --rm -i -v $mount $DockerImage mysql --defaults-extra-file=/tmp/client.cnf
   } else {
-    $old = $env:MYSQL_PWD
-    $env:MYSQL_PWD = $Password
-    try {
-      & $MysqlBin --protocol=tcp -h $HostName -P $Port -u $User -e $Sql
-    } finally {
-      $env:MYSQL_PWD = $old
-    }
+    & $MysqlBin --defaults-extra-file=$ClientCnf -e $Sql
   }
 }
 
 function Invoke-MysqlFile([string]$Db, [string]$File) {
   if ($DryRun) { return }
   if ($UseDocker) {
-    if ([string]::IsNullOrEmpty($Password)) {
-      Get-Content -Raw $File | docker run --rm -i $DockerImage mysql --protocol=tcp -h $HostName -P $Port -u $User $Db
-    } else {
-      Get-Content -Raw $File | docker run --rm -i $DockerImage mysql --protocol=tcp -h $HostName -P $Port -u $User "-p$Password" $Db
-    }
+    $mount = "${ClientCnf}:/tmp/client.cnf:ro"
+    Get-Content -Raw $File | docker run --rm -i -v $mount $DockerImage mysql --defaults-extra-file=/tmp/client.cnf $Db
   } else {
-    $old = $env:MYSQL_PWD
-    $env:MYSQL_PWD = $Password
-    try {
-      Get-Content -Raw $File | & $MysqlBin --protocol=tcp -h $HostName -P $Port -u $User $Db
-    } finally {
-      $env:MYSQL_PWD = $old
-    }
+    Get-Content -Raw $File | & $MysqlBin --defaults-extra-file=$ClientCnf $Db
   }
 }
 
@@ -117,36 +164,32 @@ function Backup-Database {
   if ($DryRun) { return }
 
   if ($UseDocker) {
-    if ([string]::IsNullOrEmpty($Password)) {
-      docker run --rm -i $DockerImage mysqldump --protocol=tcp -h $HostName -P $Port -u $User $Database | Set-Content -Encoding utf8 $backupFile
-    } else {
-      docker run --rm -i $DockerImage mysqldump --protocol=tcp -h $HostName -P $Port -u $User "-p$Password" $Database | Set-Content -Encoding utf8 $backupFile
-    }
+    $mount = "${ClientCnf}:/tmp/client.cnf:ro"
+    docker run --rm -i -v $mount $DockerImage mysqldump --defaults-extra-file=/tmp/client.cnf $Database | Set-Content -Encoding utf8 $backupFile
   } else {
-    $old = $env:MYSQL_PWD
-    $env:MYSQL_PWD = $Password
-    try {
-      & $MysqlDumpBin --protocol=tcp -h $HostName -P $Port -u $User $Database | Set-Content -Encoding utf8 $backupFile
-    } finally {
-      $env:MYSQL_PWD = $old
-    }
+    & $MysqlDumpBin --defaults-extra-file=$ClientCnf $Database | Set-Content -Encoding utf8 $backupFile
   }
 }
 
 Write-Host "[INFO] Casdoor SQL import plan"
-Write-Host "  host      : $HostName"
-Write-Host "  port      : $Port"
-Write-Host "  database  : $Database"
-Write-Host "  user      : $User"
-Write-Host "  sql       : $SqlFile"
-Write-Host "  useDocker : $UseDocker"
-Write-Host "  backup    : $BackupBefore"
-Write-Host "  dryRun    : $DryRun"
+Write-Host "  host          : $HostName"
+Write-Host "  port          : $Port"
+Write-Host "  database      : $Database"
+Write-Host "  user          : $User"
+Write-Host "  sql           : $SqlFile"
+Write-Host "  useDocker     : $UseDocker"
+Write-Host "  backup        : $BackupBefore"
+Write-Host "  createDb      : $CreateDatabase"
+Write-Host "  destructive   : $AllowDestructive"
+Write-Host "  prepareDump   : $PrepareDump"
+Write-Host "  prepareMode   : $PrepareMode"
+Write-Host "  dryRun        : $DryRun"
 
 if (-not $Yes) {
   $answer = Read-Host "Continue importing SQL into '$Database'? [y/N]"
   if ($answer -notin @("y", "Y", "yes", "YES")) {
     Write-Host "[INFO] cancelled"
+    Cleanup-TempFiles
     exit 0
   }
 }
@@ -163,3 +206,4 @@ if ($BackupBefore) {
 Write-Host "[INFO] importing SQL..."
 Invoke-MysqlFile $Database $SqlFile
 Write-Host "[OK] Casdoor SQL import completed."
+Cleanup-TempFiles
