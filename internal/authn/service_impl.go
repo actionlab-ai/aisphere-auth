@@ -150,7 +150,7 @@ func randomState() (string, error) {
 
 func normalizeRedirect(value string, fallback string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(value, "//") || strings.HasPrefix(value, `/\\`) || strings.Contains(value, `\\`) {
+	if value == "" || strings.HasPrefix(value, "//") || strings.HasPrefix(value, "/\\") || strings.Contains(value, "\\") {
 		return fallback
 	}
 	u, err := url.Parse(value)
