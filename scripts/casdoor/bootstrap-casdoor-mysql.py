@@ -43,7 +43,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cert", default="cert-built-in", help="Casdoor cert name")
     parser.add_argument("--model", default="aisphere-auth-model", help="Casbin model name")
     parser.add_argument("--permission-id", default="perm_platform_admin", help="Primary permission name for aisphere-auth config")
-    parser.add_argument("--admin-user", default="admin", help="Existing bootstrap admin username to bind to role_platform_admin")
+    parser.add_argument("--admin-user", default="admin", help="Bootstrap admin username to create/bind to role_platform_admin")
+    parser.add_argument("--admin-display-name", default="Admin", help="Bootstrap admin display name")
+    parser.add_argument("--admin-email", default="admin@example.com", help="Bootstrap admin email")
+    parser.add_argument("--admin-password", default="", help="Bootstrap admin password. Requires python bcrypt package to hash.")
+    parser.add_argument("--admin-password-hash", default="", help="Precomputed bcrypt hash for bootstrap admin password")
+    parser.add_argument("--skip-admin-user-create", action="store_true", help="Do not create/update bootstrap admin user row")
     parser.add_argument("--skip-admin-binding", action="store_true", help="Do not bind admin user to role_platform_admin")
     parser.add_argument("--created-time", default="", help="Fixed Casdoor created_time")
 
@@ -125,11 +130,19 @@ def render_seed(args: argparse.Namespace) -> None:
         "--model", args.model,
         "--permission-id", args.permission_id,
         "--admin-user", args.admin_user,
+        "--admin-display-name", args.admin_display_name,
+        "--admin-email", args.admin_email,
     ]
     if args.client_secret:
         cmd += ["--client-secret", args.client_secret]
     for uri in args.redirect_uri or ["http://127.0.0.1:18080/auth/callback/casdoor"]:
         cmd += ["--redirect-uri", uri]
+    if args.admin_password:
+        cmd += ["--admin-password", args.admin_password]
+    if args.admin_password_hash:
+        cmd += ["--admin-password-hash", args.admin_password_hash]
+    if args.skip_admin_user_create:
+        cmd.append("--skip-admin-user-create")
     if args.skip_admin_binding:
         cmd.append("--skip-admin-binding")
     if args.created_time:
@@ -202,7 +215,7 @@ def import_with_docker_mysql(args: argparse.Namespace, cnf: Path, sql: Path) -> 
 def iter_sql_statements(sql: Path) -> list[str]:
     """Split generated seed SQL into statements without requiring mysql CLI.
 
-    The seed generator intentionally emits plain SET/INSERT statements with SQL comments.
+    The seed generator intentionally emits plain SET/INSERT/DELETE statements with SQL comments.
     This parser is conservative enough for that generated SQL and avoids splitting on
     semicolons inside quoted strings.
     """
