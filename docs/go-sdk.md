@@ -8,6 +8,7 @@
 package main
 
 import (
+    "context"
     "os"
     "time"
 
@@ -117,6 +118,88 @@ authgin.RequireLogin(authClient, authgin.MiddlewareOptions{
     CacheTTL: 10 * time.Second,
 })
 ```
+
+## Audit 审计写入
+
+统一审计能力已经进入 SDK。SkillHub、AgentRuntime、SQLHub、ModelGateway 后续都可以通过同一个 Client 写审计事件。
+
+业务 handler 中推荐使用 `authgin.NewAuditEvent` 从当前请求自动带出登录人、IP、User-Agent、请求路径和 traceId：
+
+```go
+func CreateSkill(c *gin.Context) {
+    // ...业务创建逻辑...
+
+    event := authgin.NewAuditEvent(
+        c,
+        "skill",
+        skillID,
+        "skill.create",
+        aisphereauth.AuditResultSuccess,
+    )
+    event.Reason = "create skill success"
+    event.Metadata = map[string]string{
+        "skillName": req.Name,
+    }
+
+    if _, err := authClient.WriteAudit(c.Request.Context(), event); err != nil {
+        // 审计失败一般不应该阻断主业务，但必须打日志。
+        slog.Warn("write audit failed", "error", err)
+    }
+}
+```
+
+也可以手工构造：
+
+```go
+_, err := authClient.WriteAudit(ctx, aisphereauth.AuditEvent{
+    TraceID:       traceID,
+    ActorSubject:  "aisphere/admin",
+    ActorName:     "admin",
+    App:           "skillhub",
+    ResourceType:  "skill",
+    ResourceID:    skillID,
+    Action:        "skill.publish",
+    Result:        aisphereauth.AuditResultSuccess,
+    IP:            clientIP,
+    UserAgent:     userAgent,
+    RequestPath:   "/api/skills/" + skillID + "/publish",
+    RequestMethod: "POST",
+})
+```
+
+审计事件字段约定：
+
+```text
+actorSubject   操作人主体，例如 aisphere/admin
+actorName      操作人显示名
+app            业务系统，例如 skillhub
+resourceType   资源类型，例如 skill / group / proposal / release
+resourceId     资源 ID
+action         操作动作，例如 skill.create / proposal.approve
+result         success / failure / allow / deny
+reason         失败原因或补充说明
+traceId        请求链路 ID
+metadata       业务自定义扩展字段
+```
+
+## Audit 查询
+
+```go
+resp, err := authClient.ListAudit(ctx, aisphereauth.AuditListRequest{
+    App:          "skillhub",
+    ActorSubject: "aisphere/admin",
+    ResourceType: "skill",
+    Limit:        50,
+})
+if err != nil {
+    return err
+}
+for _, event := range resp.Items {
+    fmt.Println(event.Action, event.Result, event.CreatedAt)
+}
+```
+
+当前服务端默认是内存审计存储，适合本地联调和第一阶段集成；生产落库版下一步可以把 `internal/audit.Service` 换成 MySQL/Redis/ES 实现，SDK 合约不需要再改。
 
 ## Sentinel errors
 
