@@ -8,12 +8,13 @@ import (
 
 // Config is the root runtime configuration for aisphere-auth.
 type Config struct {
-	Server  ServerConfig
-	Gateway GatewayConfig
-	Casdoor CasdoorConfig
-	Session SessionConfig
-	Authz   AuthzConfig
-	Token   TokenConfig
+	Server   ServerConfig
+	Gateway  GatewayConfig
+	Casdoor  CasdoorConfig
+	Session  SessionConfig
+	Authz    AuthzConfig
+	Token    TokenConfig
+	Internal InternalConfig
 }
 
 type ServerConfig struct {
@@ -72,7 +73,15 @@ type TokenConfig struct {
 	AccessTokenTTLSeconds int
 }
 
-// Load builds config from environment variables. YAML loading will be added in the next milestone.
+// InternalConfig protects service-to-service endpoints used by SkillHub,
+// AgentRuntime, SQLHub and other trusted AI Sphere components.
+type InternalConfig struct {
+	ServiceTokenRequired bool
+	ServiceTokenHeader   string
+	ServiceToken         string
+}
+
+// Load builds config from environment variables. YAML loading will be added in a later milestone.
 func Load() Config {
 	return Config{
 		Server: ServerConfig{
@@ -122,6 +131,11 @@ func Load() Config {
 			Algorithm:             env("AISPHERE_TOKEN_ALG", "HS256"),
 			SigningSecret:         env("AISPHERE_JWT_SECRET", ""),
 			AccessTokenTTLSeconds: envInt("AISPHERE_ACCESS_TOKEN_TTL_SECONDS", 3600),
+		},
+		Internal: InternalConfig{
+			ServiceTokenRequired: envBool("AISPHERE_SERVICE_TOKEN_REQUIRED", false),
+			ServiceTokenHeader:   env("AISPHERE_SERVICE_TOKEN_HEADER", "X-Aisphere-Service-Token"),
+			ServiceToken:         env("AISPHERE_SERVICE_TOKEN", ""),
 		},
 	}
 }
