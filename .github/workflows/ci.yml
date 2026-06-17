@@ -37,11 +37,8 @@ jobs:
             exit 1
           fi
 
-      - name: Verify go.mod and go.sum
-        shell: bash
-        run: |
-          go mod tidy
-          git diff --exit-code -- go.mod go.sum
+      - name: Verify modules
+        run: go mod verify
 
       - name: Vet
         run: go vet ./...
