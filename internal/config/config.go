@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -20,9 +21,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Addr          string
-	Mode          string
-	PublicBaseURL string
+	Addr           string
+	Mode           string
+	PublicBaseURL  string
+	TrustedProxies []string
 }
 
 type GatewayConfig struct {
@@ -81,6 +83,9 @@ type InternalConfig struct {
 	ServiceTokenRequired bool
 	ServiceTokenHeader   string
 	ServiceToken         string
+	RateLimitEnabled     bool
+	RateLimitQPS         int
+	RateLimitBurst       int
 }
 
 // NewViper creates a configured Viper instance with defaults and environment bindings.
@@ -119,9 +124,10 @@ func ReadConfig(v *viper.Viper) (string, error) {
 func Load(v *viper.Viper) (Config, error) {
 	cfg := Config{
 		Server: ServerConfig{
-			Addr:          v.GetString("server.addr"),
-			Mode:          v.GetString("server.mode"),
-			PublicBaseURL: v.GetString("server.publicBaseURL"),
+			Addr:           v.GetString("server.addr"),
+			Mode:           v.GetString("server.mode"),
+			PublicBaseURL:  v.GetString("server.publicBaseURL"),
+			TrustedProxies: getStringSlice(v, "server.trustedProxies"),
 		},
 		Gateway: GatewayConfig{
 			CookieDomain:   v.GetString("gateway.cookieDomain"),
@@ -170,6 +176,9 @@ func Load(v *viper.Viper) (Config, error) {
 			ServiceTokenRequired: v.GetBool("internal.serviceTokenRequired"),
 			ServiceTokenHeader:   v.GetString("internal.serviceTokenHeader"),
 			ServiceToken:         v.GetString("internal.serviceToken"),
+			RateLimitEnabled:     v.GetBool("internal.rateLimitEnabled"),
+			RateLimitQPS:         v.GetInt("internal.rateLimitQPS"),
+			RateLimitBurst:       v.GetInt("internal.rateLimitBurst"),
 		},
 	}
 
@@ -181,6 +190,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.addr", ":18080")
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.publicBaseURL", "http://127.0.0.1:18080")
+	v.SetDefault("server.trustedProxies", []string{})
 
 	v.SetDefault("gateway.cookieDomain", "")
 	v.SetDefault("gateway.cookieSecure", false)
@@ -222,12 +232,16 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("internal.serviceTokenRequired", false)
 	v.SetDefault("internal.serviceTokenHeader", "X-Aisphere-Service-Token")
 	v.SetDefault("internal.serviceToken", "")
+	v.SetDefault("internal.rateLimitEnabled", true)
+	v.SetDefault("internal.rateLimitQPS", 100)
+	v.SetDefault("internal.rateLimitBurst", 200)
 }
 
 func bindLegacyEnvs(v *viper.Viper) {
 	_ = v.BindEnv("server.addr", "AISPHERE_AUTH_ADDR")
 	_ = v.BindEnv("server.mode", "AISPHERE_AUTH_MODE")
 	_ = v.BindEnv("server.publicBaseURL", "AISPHERE_AUTH_PUBLIC_BASE_URL")
+	_ = v.BindEnv("server.trustedProxies", "AISPHERE_TRUSTED_PROXIES")
 	_ = v.BindEnv("gateway.cookieDomain", "AISPHERE_COOKIE_DOMAIN")
 	_ = v.BindEnv("gateway.cookieSecure", "AISPHERE_COOKIE_SECURE")
 	_ = v.BindEnv("gateway.cookieSameSite", "AISPHERE_COOKIE_SAMESITE")
@@ -262,6 +276,9 @@ func bindLegacyEnvs(v *viper.Viper) {
 	_ = v.BindEnv("internal.serviceTokenRequired", "AISPHERE_SERVICE_TOKEN_REQUIRED")
 	_ = v.BindEnv("internal.serviceTokenHeader", "AISPHERE_SERVICE_TOKEN_HEADER")
 	_ = v.BindEnv("internal.serviceToken", "AISPHERE_SERVICE_TOKEN")
+	_ = v.BindEnv("internal.rateLimitEnabled", "AISPHERE_INTERNAL_RATE_LIMIT_ENABLED")
+	_ = v.BindEnv("internal.rateLimitQPS", "AISPHERE_INTERNAL_RATE_LIMIT_QPS")
+	_ = v.BindEnv("internal.rateLimitBurst", "AISPHERE_INTERNAL_RATE_LIMIT_BURST")
 }
 
 func getStringSlice(v *viper.Viper, key string) []string {
@@ -281,8 +298,10 @@ func getStringSlice(v *viper.Viper, key string) []string {
 
 func normalize(cfg *Config) {
 	cfg.Server.Mode = strings.TrimSpace(cfg.Server.Mode)
+	cfg.Server.PublicBaseURL = strings.TrimSpace(cfg.Server.PublicBaseURL)
 	cfg.Gateway.CookieSameSite = normalizeCookieSameSite(cfg.Gateway.CookieSameSite)
 	cfg.Session.Provider = strings.ToLower(strings.TrimSpace(cfg.Session.Provider))
+	cfg.Session.CookieName = strings.TrimSpace(cfg.Session.CookieName)
 	cfg.Authz.Provider = strings.ToLower(strings.TrimSpace(cfg.Authz.Provider))
 	cfg.Token.Algorithm = strings.ToUpper(strings.TrimSpace(cfg.Token.Algorithm))
 	cfg.Internal.ServiceTokenHeader = strings.TrimSpace(cfg.Internal.ServiceTokenHeader)
@@ -310,8 +329,34 @@ func validate(cfg Config) error {
 	if strings.TrimSpace(cfg.Server.Addr) == "" {
 		return fmt.Errorf("server.addr 不能为空")
 	}
+	if _, err := url.ParseRequestURI(cfg.Server.PublicBaseURL); cfg.Server.PublicBaseURL != "" && err != nil {
+		return fmt.Errorf("server.publicBaseURL 必须是合法 URL: %w", err)
+	}
+	for _, proxy := range cfg.Server.TrustedProxies {
+		if _, _, err := parseProxyCIDR(proxy); err != nil {
+			return fmt.Errorf("server.trustedProxies 包含非法 CIDR/IP %q: %w", proxy, err)
+		}
+	}
+	if strings.TrimSpace(cfg.Casdoor.Endpoint) == "" {
+		return fmt.Errorf("casdoor.endpoint 不能为空")
+	}
+	if u, err := url.Parse(cfg.Casdoor.Endpoint); err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("casdoor.endpoint 必须是带 scheme/host 的合法 URL")
+	}
+	if strings.TrimSpace(cfg.Casdoor.ClientID) == "" {
+		return fmt.Errorf("casdoor.clientId 不能为空")
+	}
+	if strings.TrimSpace(cfg.Casdoor.ClientSecret) == "" {
+		return fmt.Errorf("casdoor.clientSecret 不能为空")
+	}
+	if strings.TrimSpace(cfg.Session.CookieName) == "" {
+		return fmt.Errorf("session.cookieName 不能为空")
+	}
 	if cfg.Session.TTLSeconds <= 0 {
 		return fmt.Errorf("session.ttlSeconds 必须大于 0")
+	}
+	if cfg.Authz.CacheEnabled && cfg.Authz.CacheTTLSeconds <= 0 {
+		return fmt.Errorf("authz.cacheEnabled=true 时 authz.cacheTTLSeconds 必须大于 0")
 	}
 	if cfg.Authz.CacheTTLSeconds < 0 {
 		return fmt.Errorf("authz.cacheTTLSeconds 不能小于 0")
@@ -325,5 +370,28 @@ func validate(cfg Config) error {
 	if cfg.Token.Enabled && strings.TrimSpace(cfg.Token.SigningSecret) == "" {
 		return fmt.Errorf("token.enabled=true 时 token.signingSecret/AISPHERE_JWT_SECRET 不能为空")
 	}
+	if cfg.Internal.ServiceTokenRequired {
+		if len(strings.TrimSpace(cfg.Internal.ServiceToken)) < 32 {
+			return fmt.Errorf("internal.serviceTokenRequired=true 时 internal.serviceToken 长度至少 32 位")
+		}
+	}
+	if cfg.Internal.RateLimitQPS <= 0 {
+		return fmt.Errorf("internal.rateLimitQPS 必须大于 0")
+	}
+	if cfg.Internal.RateLimitBurst <= 0 {
+		return fmt.Errorf("internal.rateLimitBurst 必须大于 0")
+	}
 	return nil
+}
+
+func parseProxyCIDR(value string) (string, *url.URL, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil, nil
+	}
+	if strings.Contains(value, "/") {
+		_, _, err := strings.Cut(value, "/")
+		return value, nil, err
+	}
+	return value, nil, nil
 }
