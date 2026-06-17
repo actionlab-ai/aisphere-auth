@@ -1,16 +1,14 @@
 package audit
 
-import "context"
+import (
+	"context"
 
-type Event struct {
-	TraceID string
-	Subject string
-	Object  string
-	Action  string
-	Allow   bool
-	Reason  string
-}
+	"github.com/actionlab-ai/aisphere-auth/pkg/aisphereauth"
+)
 
 type Service interface {
-	Write(ctx context.Context, event Event) error
+	Write(ctx context.Context, event aisphereauth.AuditEvent) (*aisphereauth.AuditEvent, error)
+	List(ctx context.Context, req aisphereauth.AuditListRequest) (*aisphereauth.AuditListResponse, error)
+	Ping(ctx context.Context) error
+	Close() error
 }
