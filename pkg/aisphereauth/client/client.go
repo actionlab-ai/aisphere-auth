@@ -34,4 +34,6 @@ type Client interface {
 	Introspect(ctx context.Context, sessionID string, app string) (*aisphereauth.Principal, error)
 	Check(ctx context.Context, req CheckRequest) (*Decision, error)
 	BatchCheck(ctx context.Context, reqs []CheckRequest) ([]Decision, error)
+	WriteAudit(ctx context.Context, event aisphereauth.AuditEvent) (*aisphereauth.AuditEvent, error)
+	ListAudit(ctx context.Context, req aisphereauth.AuditListRequest) (*aisphereauth.AuditListResponse, error)
 }
