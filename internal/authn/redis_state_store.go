@@ -35,13 +35,14 @@ func NewRedisStateStore(cfg config.RedisConfig) (*RedisStateStore, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
 		return nil, fmt.Errorf("redis ping failed: %w", err)
 	}
 	return &RedisStateStore{client: client, prefix: prefix}, nil
 }
 
 func (s *RedisStateStore) Create(ctx context.Context, st LoginState, ttl time.Duration) error {
-	if strings.TrimSpace(st.State) == "" {
+	if len(st.State) == 0 || len(st.State) > maxOAuthStateLength {
 		return ErrInvalidState
 	}
 	payload, err := json.Marshal(st)
@@ -53,7 +54,7 @@ func (s *RedisStateStore) Create(ctx context.Context, st LoginState, ttl time.Du
 
 func (s *RedisStateStore) Consume(ctx context.Context, state string) (LoginState, error) {
 	state = strings.TrimSpace(state)
-	if state == "" {
+	if len(state) == 0 || len(state) > maxOAuthStateLength {
 		return LoginState{}, ErrStateNotFound
 	}
 	key := s.key(state)
@@ -69,6 +70,10 @@ func (s *RedisStateStore) Consume(ctx context.Context, state string) (LoginState
 		return LoginState{}, fmt.Errorf("unmarshal login state: %w", err)
 	}
 	return st, nil
+}
+
+func (s *RedisStateStore) Close() error {
+	return s.client.Close()
 }
 
 func (s *RedisStateStore) key(state string) string {
