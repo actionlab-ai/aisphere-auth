@@ -17,3 +17,13 @@ type Principal struct {
 	AuthTimeUnix   int64    `json:"authTimeUnix,omitempty"`
 	ExpiresAtUnix  int64    `json:"expiresAtUnix,omitempty"`
 }
+
+func (p *Principal) EffectiveSubject() string {
+	if p == nil {
+		return ""
+	}
+	if p.CasdoorSubject != "" {
+		return p.CasdoorSubject
+	}
+	return p.SubjectID
+}
