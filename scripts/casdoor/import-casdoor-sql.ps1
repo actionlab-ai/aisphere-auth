@@ -63,6 +63,14 @@ Casdoor SQL 自动导入工具（PowerShell）
     -BackupBefore `
     -Yes
 
+只生成 seed SQL，不连接 MySQL：
+  powershell -ExecutionPolicy Bypass -File .\scripts\casdoor\import-casdoor-sql.ps1 `
+    -Seed `
+    -SeedOnly `
+    -SeedOutput .\deployments\casdoor\sql\aisphere-auth-casdoor.sql `
+    -SeedEnvOutput .\.env.casdoor.generated `
+    -SeedClientSecret 'replace-with-oauth-secret'
+
 迁移旧 Casdoor dump：
   使用 -PrepareDump -PrepareMode data-only。
 "@
@@ -80,11 +88,6 @@ function Get-PythonCommand {
   throw "python or python3 is required"
 }
 
-Assert-Identifier "database" $Database '^[A-Za-z0-9_]+$'
-Assert-Identifier "user" $User '^[A-Za-z0-9_-]+$'
-Assert-Identifier "port" ([string]$Port) '^[0-9]+$'
-if ($Seed -and $PrepareDump) { throw "-Seed and -PrepareDump are mutually exclusive" }
-
 $TempFiles = @()
 function Cleanup-TempFiles {
   foreach ($file in $TempFiles) {
@@ -94,6 +97,24 @@ function Cleanup-TempFiles {
   }
 }
 trap { Cleanup-TempFiles; throw }
+
+function New-AisphereMysqlClientCnf {
+  $file = New-TemporaryFile
+  $script:TempFiles += $file.FullName
+  @"
+[client]
+user=$User
+password=$Password
+host=$HostName
+port=$Port
+protocol=tcp
+"@ | Set-Content -Encoding ascii $file.FullName
+  return $file.FullName
+}
+
+function Test-CommandExists([string]$Command) {
+  $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
+}
 
 function Render-SeedSql {
   $renderer = "scripts/casdoor/render-casdoor-seed.py"
@@ -114,6 +135,7 @@ function Render-SeedSql {
     foreach ($uri in $SeedRedirectUri) { $args += @("--redirect-uri", $uri) }
   }
   & $python @args
+  if ($LASTEXITCODE -ne 0) { throw "seed renderer failed with exit code $LASTEXITCODE" }
   $script:SqlFile = $SeedOutput
   if ($SeedOnly) {
     Write-Host "[OK] seed-only completed: $SqlFile"
@@ -134,6 +156,7 @@ function Prepare-DumpSql {
   $args = @($prepareTool, "--input", $SqlFile, "--output", $PreparedSql, "--mode", $PrepareMode, "--keywords", $PrepareKeywords)
   if ($PrepareIncludeUsers) { $args += "--include-users" }
   & $python @args
+  if ($LASTEXITCODE -ne 0) { throw "prepare tool failed with exit code $LASTEXITCODE" }
   $script:SqlFile = $PreparedSql
   if ($PrepareOnly) {
     Write-Host "[OK] prepare-only completed: $SqlFile"
@@ -141,50 +164,6 @@ function Prepare-DumpSql {
     exit 0
   }
 }
-
-if ($Seed) {
-  Render-SeedSql
-} elseif (-not (Test-Path $SqlFile)) {
-  throw "SQL file not found: $SqlFile. Use -Seed to render project seed SQL or pass -SqlFile."
-}
-
-if ($PrepareDump) { Prepare-DumpSql }
-
-if (-not $AllowDestructive) {
-  $sample = Get-Content -Raw $SqlFile
-  if ($sample -match '(?i)(^|\s)(DROP\s+TABLE|CREATE\s+TABLE|DROP\s+DATABASE)') {
-    throw "SQL contains destructive schema statements. Use -Seed for project bootstrap, -PrepareDump -PrepareMode data-only for migration, or pass -AllowDestructive deliberately."
-  }
-}
-
-function Test-CommandExists([string]$Command) {
-  $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
-}
-
-if (-not $UseDocker -and -not (Test-CommandExists $MysqlBin)) {
-  if (Test-CommandExists "docker") {
-    Write-Warning "mysql client not found, fallback to docker image: $DockerImage"
-    $UseDocker = $true
-  } else {
-    throw "mysql client not found and docker is unavailable. Install mysql client or pass -UseDocker."
-  }
-}
-
-function New-ClientCnf {
-  $file = New-TemporaryFile
-  $script:TempFiles += $file.FullName
-  @"
-[client]
-user=$User
-password=$Password
-host=$HostName
-port=$Port
-protocol=tcp
-"@ | Set-Content -Encoding ascii $file.FullName
-  return $file.FullName
-}
-
-$ClientCnf = New-ClientCnf
 
 function Invoke-MysqlExec([string]$Sql) {
   if ($DryRun) { return }
@@ -220,6 +199,37 @@ function Backup-Database {
     & $MysqlDumpBin --defaults-extra-file=$ClientCnf $Database | Set-Content -Encoding utf8 $backupFile
   }
 }
+
+Assert-Identifier "database" $Database '^[A-Za-z0-9_]+$'
+Assert-Identifier "user" $User '^[A-Za-z0-9_-]+$'
+Assert-Identifier "port" ([string]$Port) '^[0-9]+$'
+if ($Seed -and $PrepareDump) { throw "-Seed and -PrepareDump are mutually exclusive" }
+
+if ($Seed) {
+  Render-SeedSql
+} elseif (-not (Test-Path $SqlFile)) {
+  throw "SQL file not found: $SqlFile. Use -Seed to render project seed SQL or pass -SqlFile."
+}
+
+if ($PrepareDump) { Prepare-DumpSql }
+
+if (-not $AllowDestructive) {
+  $sample = Get-Content -Raw $SqlFile
+  if ($sample -match '(?i)(^|\s)(DROP\s+TABLE|CREATE\s+TABLE|DROP\s+DATABASE)') {
+    throw "SQL contains destructive schema statements. Use -Seed for project bootstrap, -PrepareDump -PrepareMode data-only for migration, or pass -AllowDestructive deliberately."
+  }
+}
+
+if (-not $UseDocker -and -not (Test-CommandExists $MysqlBin)) {
+  if (Test-CommandExists "docker") {
+    Write-Warning "mysql client not found, fallback to docker image: $DockerImage"
+    $UseDocker = $true
+  } else {
+    throw "mysql client not found and docker is unavailable. Install mysql client or pass -UseDocker."
+  }
+}
+
+$ClientCnf = New-AisphereMysqlClientCnf
 
 Write-Host "[INFO] Casdoor SQL import plan"
 Write-Host "  host          : $HostName"
