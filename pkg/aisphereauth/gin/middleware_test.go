@@ -33,6 +33,14 @@ func (f *fakeClient) BatchCheck(ctx context.Context, reqs []client.CheckRequest)
 	return nil, nil
 }
 
+func (f *fakeClient) WriteAudit(ctx context.Context, event aisphereauth.AuditEvent) (*aisphereauth.AuditEvent, error) {
+	return &event, nil
+}
+
+func (f *fakeClient) ListAudit(ctx context.Context, req aisphereauth.AuditListRequest) (*aisphereauth.AuditListResponse, error) {
+	return &aisphereauth.AuditListResponse{}, nil
+}
+
 func TestRequireLoginCachesIntrospection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	authClient := &fakeClient{}
