@@ -16,14 +16,28 @@ BACKUP_DIR="backups/casdoor"
 CREATE_DATABASE="false"
 DRY_RUN="false"
 YES="false"
+ALLOW_DESTRUCTIVE="false"
+PREPARE_DUMP="false"
+PREPARE_MODE="data-only"
+PREPARED_SQL=""
+PREPARE_KEYWORDS="aisphere,skillhub"
+PREPARE_INCLUDE_USERS="false"
+PREPARE_ONLY="false"
 MYSQL_CNF=""
+DOCKER_CNF_DIR=""
+TEMP_SQL_FILE=""
 
 usage() {
   cat <<'EOF'
 Casdoor SQL 自动导入工具
 
 用途：
-  将已经准备好的 Casdoor SQL 初始化文件导入到现有 Casdoor MySQL 数据库，避免手工在 Casdoor UI 中点模型、权限、角色、策略。
+  将 Casdoor SQL 初始化文件导入到现有 Casdoor MySQL 数据库，避免手工在 Casdoor UI 中点模型、权限、角色、策略。
+
+推荐流程：
+  1. 从已配置好的同版本 Casdoor 导出 SQL，例如 casdoor.sql。
+  2. 使用 --prepare-dump --prepare-mode data-only 提取 aisphere/skillhub 相关数据。
+  3. 导入前使用 --backup-before 备份目标库。
 
 用法：
   bash scripts/casdoor/import-casdoor-sql.sh \
@@ -32,7 +46,9 @@ Casdoor SQL 自动导入工具
     --database casdoor \
     --user root \
     --password 'your-password' \
-    --sql deployments/casdoor/sql/aisphere-auth-casdoor.sql \
+    --sql ./casdoor.sql \
+    --prepare-dump \
+    --prepare-mode data-only \
     --backup-before \
     -y
 
@@ -49,14 +65,25 @@ Casdoor SQL 自动导入工具
   --backup-before            导入前先 mysqldump 备份目标数据库
   --backup-dir <dir>         备份目录，默认 backups/casdoor
   --create-database          导入前执行 CREATE DATABASE IF NOT EXISTS
+  --allow-destructive        允许导入包含 DROP/CREATE TABLE 的完整 dump。生产请谨慎使用。
   --dry-run                  只打印将执行的动作，不真正导入
   -y, --yes                  跳过确认
-  -h, --help                 显示帮助
+
+适配完整 Casdoor dump：
+  --prepare-dump             导入前先把原始 dump 处理成可导入 SQL
+  --prepare-mode <mode>      data-only 或 full，默认 data-only
+                             data-only：只提取 aisphere/skillhub 相关数据，使用 REPLACE INTO，适合已有 Casdoor
+                             full：保留完整 schema/data，但去掉 GTID、SQL_LOG_BIN、CREATE DATABASE、USE、LOCK TABLES
+  --prepared-sql <file>      处理后的 SQL 输出路径。默认写到临时文件
+  --prepare-keywords <list>  data-only 提取关键字，默认 aisphere,skillhub
+  --prepare-include-users    data-only 模式也提取匹配用户。会复制密码 hash，需谨慎。
+  --prepare-only             只生成处理后的 SQL，不执行导入
 
 注意：
-  1. SQL 文件应来自同版本或兼容版本的 Casdoor 数据库导出。
-  2. 直接写死 Casdoor 表结构容易受版本影响，本脚本只负责可靠导入，不在脚本中拼接业务 INSERT。
-  3. 生产导入建议开启 --backup-before。
+  1. 完整 mysqldump 常包含 SET @@GLOBAL.GTID_PURGED、CREATE DATABASE、USE、LOCK TABLES，直接导入到受限 MySQL 往往失败。
+  2. data-only 模式不会导入 token/session/record/ticket 等运行态数据，适合把已配置好的 Casdoor 权限迁移到目标环境。
+  3. full 模式可能 DROP/CREATE Casdoor 表，必须显式传 --allow-destructive。
+  4. 生产导入建议开启 --backup-before。
 EOF
 }
 
@@ -74,6 +101,13 @@ while [[ $# -gt 0 ]]; do
     --backup-before) BACKUP_BEFORE="true"; shift ;;
     --backup-dir) BACKUP_DIR="$2"; shift 2 ;;
     --create-database) CREATE_DATABASE="true"; shift ;;
+    --allow-destructive) ALLOW_DESTRUCTIVE="true"; shift ;;
+    --prepare-dump) PREPARE_DUMP="true"; shift ;;
+    --prepare-mode) PREPARE_MODE="$2"; shift 2 ;;
+    --prepared-sql) PREPARED_SQL="$2"; shift 2 ;;
+    --prepare-keywords) PREPARE_KEYWORDS="$2"; shift 2 ;;
+    --prepare-include-users) PREPARE_INCLUDE_USERS="true"; shift ;;
+    --prepare-only) PREPARE_ONLY="true"; shift ;;
     --dry-run) DRY_RUN="true"; shift ;;
     -y|--yes) YES="true"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -98,10 +132,20 @@ validate_identifier() {
 validate_identifier "database" "$DATABASE" '^[A-Za-z0-9_]+$'
 validate_identifier "user" "$USER" '^[A-Za-z0-9_-]+$'
 validate_identifier "port" "$PORT" '^[0-9]+$'
+case "$PREPARE_MODE" in
+  data-only|full) ;;
+  *) echo "[ERROR] invalid --prepare-mode: $PREPARE_MODE" >&2; exit 1 ;;
+esac
 
 cleanup() {
   if [[ -n "${MYSQL_CNF}" && -f "${MYSQL_CNF}" ]]; then
     rm -f "${MYSQL_CNF}"
+  fi
+  if [[ -n "${DOCKER_CNF_DIR}" && -d "${DOCKER_CNF_DIR}" ]]; then
+    rm -rf "${DOCKER_CNF_DIR}"
+  fi
+  if [[ -n "${TEMP_SQL_FILE}" && -f "${TEMP_SQL_FILE}" ]]; then
+    rm -f "${TEMP_SQL_FILE}"
   fi
 }
 trap cleanup EXIT
@@ -119,10 +163,59 @@ protocol=tcp
 EOF
 }
 
+create_docker_cnf() {
+  DOCKER_CNF_DIR="$(mktemp -d)"
+  chmod 700 "${DOCKER_CNF_DIR}"
+  cat > "${DOCKER_CNF_DIR}/client.cnf" <<EOF
+[client]
+user=${USER}
+password=${PASSWORD}
+host=${HOST}
+port=${PORT}
+protocol=tcp
+EOF
+  chmod 600 "${DOCKER_CNF_DIR}/client.cnf"
+}
+
 if [[ ! -f "$SQL_FILE" ]]; then
   echo "[ERROR] SQL file not found: $SQL_FILE" >&2
   echo "        Put your exported Casdoor SQL at this path or pass --sql <file>." >&2
   exit 1
+fi
+
+if [[ "$PREPARE_DUMP" == "true" ]]; then
+  PREPARE_TOOL="scripts/casdoor/prepare-casdoor-sql.py"
+  if [[ ! -f "$PREPARE_TOOL" ]]; then
+    echo "[ERROR] prepare tool not found: $PREPARE_TOOL" >&2
+    exit 1
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "[ERROR] python3 is required for --prepare-dump" >&2
+    exit 1
+  fi
+  if [[ -z "$PREPARED_SQL" ]]; then
+    TEMP_SQL_FILE="$(mktemp /tmp/aisphere-casdoor-prepared.XXXXXX.sql)"
+    PREPARED_SQL="$TEMP_SQL_FILE"
+  fi
+  echo "[INFO] preparing Casdoor SQL: mode=$PREPARE_MODE output=$PREPARED_SQL"
+  PREPARE_ARGS=(python3 "$PREPARE_TOOL" --input "$SQL_FILE" --output "$PREPARED_SQL" --mode "$PREPARE_MODE" --keywords "$PREPARE_KEYWORDS")
+  if [[ "$PREPARE_INCLUDE_USERS" == "true" ]]; then
+    PREPARE_ARGS+=(--include-users)
+  fi
+  "${PREPARE_ARGS[@]}"
+  SQL_FILE="$PREPARED_SQL"
+  if [[ "$PREPARE_ONLY" == "true" ]]; then
+    echo "[OK] prepare-only completed: $SQL_FILE"
+    exit 0
+  fi
+fi
+
+if [[ "$ALLOW_DESTRUCTIVE" != "true" ]]; then
+  if grep -Eiq '(^|[[:space:]])(DROP[[:space:]]+TABLE|CREATE[[:space:]]+TABLE|DROP[[:space:]]+DATABASE)' "$SQL_FILE"; then
+    echo "[ERROR] SQL contains destructive schema statements." >&2
+    echo "        Use --prepare-dump --prepare-mode data-only for existing Casdoor, or pass --allow-destructive deliberately." >&2
+    exit 1
+  fi
 fi
 
 if [[ "$USE_DOCKER" != "true" && ! -x "$(command -v "$MYSQL_BIN" || true)" ]]; then
@@ -135,7 +228,9 @@ if [[ "$USE_DOCKER" != "true" && ! -x "$(command -v "$MYSQL_BIN" || true)" ]]; t
   fi
 fi
 
-if [[ "$USE_DOCKER" != "true" ]]; then
+if [[ "$USE_DOCKER" == "true" ]]; then
+  create_docker_cnf
+else
   create_mysql_cnf
 fi
 
@@ -143,7 +238,7 @@ run_mysql_file() {
   local target_db="$1"
   local sql_file="$2"
   if [[ "$USE_DOCKER" == "true" ]]; then
-    docker run --rm -i -e MYSQL_PWD="$PASSWORD" "$DOCKER_IMAGE" mysql --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" "$target_db" < "$sql_file"
+    docker run --rm -i -v "${DOCKER_CNF_DIR}/client.cnf:/tmp/client.cnf:ro" "$DOCKER_IMAGE" mysql --defaults-extra-file=/tmp/client.cnf "$target_db" < "$sql_file"
   else
     "$MYSQL_BIN" --defaults-extra-file="$MYSQL_CNF" "$target_db" < "$sql_file"
   fi
@@ -152,7 +247,7 @@ run_mysql_file() {
 run_mysql_exec() {
   local sql="$1"
   if [[ "$USE_DOCKER" == "true" ]]; then
-    docker run --rm -i -e MYSQL_PWD="$PASSWORD" "$DOCKER_IMAGE" mysql --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" -e "$sql"
+    printf '%s\n' "$sql" | docker run --rm -i -v "${DOCKER_CNF_DIR}/client.cnf:/tmp/client.cnf:ro" "$DOCKER_IMAGE" mysql --defaults-extra-file=/tmp/client.cnf
   else
     "$MYSQL_BIN" --defaults-extra-file="$MYSQL_CNF" -e "$sql"
   fi
@@ -168,7 +263,7 @@ backup_database() {
     return 0
   fi
   if [[ "$USE_DOCKER" == "true" ]]; then
-    docker run --rm -i -e MYSQL_PWD="$PASSWORD" "$DOCKER_IMAGE" mysqldump --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" "$DATABASE" > "$backup_file"
+    docker run --rm -i -v "${DOCKER_CNF_DIR}/client.cnf:/tmp/client.cnf:ro" "$DOCKER_IMAGE" mysqldump --defaults-extra-file=/tmp/client.cnf "$DATABASE" > "$backup_file"
   else
     "$MYSQLDUMP_BIN" --defaults-extra-file="$MYSQL_CNF" "$DATABASE" > "$backup_file"
   fi
@@ -176,14 +271,18 @@ backup_database() {
 
 cat <<EOF
 [INFO] Casdoor SQL import plan
-  host      : $HOST
-  port      : $PORT
-  database  : $DATABASE
-  user      : $USER
-  sql       : $SQL_FILE
-  useDocker : $USE_DOCKER
-  backup    : $BACKUP_BEFORE
-  dryRun    : $DRY_RUN
+  host          : $HOST
+  port          : $PORT
+  database      : $DATABASE
+  user          : $USER
+  sql           : $SQL_FILE
+  useDocker     : $USE_DOCKER
+  backup        : $BACKUP_BEFORE
+  createDb      : $CREATE_DATABASE
+  destructive   : $ALLOW_DESTRUCTIVE
+  prepareDump   : $PREPARE_DUMP
+  prepareMode   : $PREPARE_MODE
+  dryRun        : $DRY_RUN
 EOF
 
 if [[ "$YES" != "true" ]]; then
