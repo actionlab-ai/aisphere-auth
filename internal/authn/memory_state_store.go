@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-var ErrStateNotFound = errors.New("login state not found")
+var (
+	ErrStateNotFound  = errors.New("login state not found")
+	ErrStateStoreFull = errors.New("login state store full")
+)
 
 const maxMemoryLoginStates = 10000
 
@@ -20,6 +23,7 @@ type MemoryStateStore struct {
 	mu    sync.RWMutex
 	items map[string]stateItem
 	stop  chan struct{}
+	once  sync.Once
 }
 
 func NewMemoryStateStore() *MemoryStateStore {
@@ -29,24 +33,31 @@ func NewMemoryStateStore() *MemoryStateStore {
 }
 
 func (s *MemoryStateStore) Create(ctx context.Context, st LoginState, ttl time.Duration) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(st.State) == 0 || len(st.State) > maxOAuthStateLength {
+		return ErrInvalidState
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.items) >= maxMemoryLoginStates {
 		s.cleanupExpiredLocked(time.Now())
 	}
 	if len(s.items) >= maxMemoryLoginStates {
-		for key := range s.items {
-			delete(s.items, key)
-			break
-		}
+		return ErrStateStoreFull
 	}
 	s.items[st.State] = stateItem{state: st, expiresAt: time.Now().Add(ttl)}
 	return nil
 }
 
 func (s *MemoryStateStore) Consume(ctx context.Context, state string) (LoginState, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return LoginState{}, err
+	}
+	if len(state) == 0 || len(state) > maxOAuthStateLength {
+		return LoginState{}, ErrStateNotFound
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, ok := s.items[state]
@@ -58,6 +69,11 @@ func (s *MemoryStateStore) Consume(ctx context.Context, state string) (LoginStat
 		return LoginState{}, ErrStateNotFound
 	}
 	return item.state, nil
+}
+
+func (s *MemoryStateStore) Close() error {
+	s.once.Do(func() { close(s.stop) })
+	return nil
 }
 
 // CleanupExpired removes expired login states. It is public for tests and also
