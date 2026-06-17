@@ -19,6 +19,11 @@ coverage.html
 !.env.example
 configs/config.yaml
 
+# generated / sensitive Casdoor SQL
+casdoor.sql
+deployments/casdoor/sql/*.sql
+!deployments/casdoor/sql/*.example.sql
+
 # IDE
 .vscode/
 .idea/
