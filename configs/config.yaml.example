@@ -47,12 +47,14 @@ gateway:
   # Cookie 是否启用 Secure。
   # HTTPS 生产环境必须为 true。
   # 本地 HTTP 开发环境可为 false，否则浏览器不会保存 Cookie。
+  # 如果 cookieSameSite=None，则这里必须为 true。
   # 对应环境变量：AISPHERE_COOKIE_SECURE
   cookieSecure: false
 
   # Cookie SameSite 策略。
   # 推荐值：Lax。
-  # 如果跨站点嵌入或特殊 SSO 场景可能需要 None，但 None 通常要求 Secure=true。
+  # 可选值：Lax、Strict、None、Default。
+  # 如果跨站点嵌入或特殊 SSO 场景可能需要 None，但 None 要求 cookieSecure=true。
   # 对应环境变量：AISPHERE_COOKIE_SAMESITE
   cookieSameSite: "Lax"
 
@@ -195,8 +197,9 @@ token:
   # 是否启用 AI Sphere 本地 Token 能力。
   # 当前主要为后续 CLI、AgentRuntime、服务间调用预留。
   # Web 控制台主链路仍使用 HttpOnly Cookie + Redis Session。
+  # 当前实现尚未正式签发 JWT，默认关闭；打开时 signingSecret 必填。
   # 对应环境变量：AISPHERE_TOKEN_ENABLED
-  enabled: true
+  enabled: false
 
   # Token issuer。
   # 后续 JWT iss 字段会使用该值。
@@ -215,11 +218,11 @@ token:
   alg: "HS256"
 
   # JWT 签名密钥。
-  # 生产环境必须替换为长随机字符串，并通过 Secret 注入。
+  # token.enabled=true 时必须填写长随机字符串，并通过 Secret 注入。
   # 对应环境变量：AISPHERE_JWT_SECRET
-  signingSecret: "change-me"
+  signingSecret: ""
 
-  # Access Token 有效期，单位秒。
+  # Token 有效期，单位秒。
   # 对应环境变量：AISPHERE_ACCESS_TOKEN_TTL_SECONDS
   accessTokenTTLSeconds: 3600
 
