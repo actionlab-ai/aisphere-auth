@@ -9,7 +9,7 @@ AI Sphere 统一认证授权服务。
 - Gin HTTP Server
 - Cobra 中文 CLI 帮助：`aisphere-auth -h`
 - Viper 配置加载：命令行参数 > 环境变量 > 配置文件 > 默认值
-- `/healthz` 和真实依赖检查的 `/readyz`
+- `/healthz`、轻量 `/livez` 和真实依赖检查的 `/readyz`
 - Casdoor OAuth 登录 URL 生成和 callback 处理
 - AI Sphere Session，支持 memory 或 Redis 存储
 - Redis login state store
@@ -18,7 +18,10 @@ AI Sphere 统一认证授权服务。
 - service token 保护的 `/auth/sessions/introspect`、`/authz/check`、`/authz/batch-check`
 - 内部 API 限流
 - 短 TTL AuthZ decision cache
-- 公共 `pkg/aisphereauth` HTTP Client 和 Gin Middleware 骨架
+- 公共 `pkg/aisphereauth` HTTP Client 和 Gin Middleware
+- Gin SDK 本地 introspect 缓存，降低每请求 RPC 的 N+1 问题
+- SDK 自定义 401/403/error 响应钩子
+- OpenAPI 契约：`api/openapi.yaml`，便于 Python / Java / JS 生成客户端
 - GitHub Actions CI
 - 离线 `.run` 构建和安装能力
 - Casdoor 项目专用 Seed SQL 生成和导入能力
@@ -154,6 +157,7 @@ go run ./cmd/server --config configs/config.yaml
 
 ```bash
 curl http://127.0.0.1:18080/healthz
+curl http://127.0.0.1:18080/livez
 curl http://127.0.0.1:18080/readyz
 ```
 
@@ -183,8 +187,20 @@ http://127.0.0.1:18080/auth/login?app=skillhub&redirect=/
 适合新环境、已有 Casdoor 但没有配置 AI Sphere 的场景：
 
 ```bash
-python3 scripts/casdoor/render-casdoor-seed.py --output deployments/casdoor/sql/aisphere-auth-casdoor.sql
-bash scripts/casdoor/import-casdoor-sql.sh --sql deployments/casdoor/sql/aisphere-auth-casdoor.sql --backup-before -y
+bash scripts/casdoor/import-casdoor-sql.sh \
+  --seed \
+  --seed-org aisphere \
+  --seed-app aisphere-auth \
+  --seed-client-id aisphere-auth \
+  --seed-client-secret '<OAuth Client Secret>' \
+  --seed-redirect-uri http://127.0.0.1:18080/auth/callback/casdoor \
+  --host 127.0.0.1 \
+  --port 3306 \
+  --database casdoor \
+  --user root \
+  --password '<Casdoor MySQL 密码>' \
+  --backup-before \
+  -y
 ```
 
 详细说明见：[docs/casdoor-bootstrap-seed.md](docs/casdoor-bootstrap-seed.md)。
@@ -203,7 +219,43 @@ python3 scripts/casdoor/prepare-casdoor-sql.py \
 
 这个方式依赖历史环境命名，不是开箱即用初始化的默认方案。
 
-## 三、CLI 用法
+## 三、业务系统 Go SDK 接入
+
+Go 服务优先使用：
+
+```text
+pkg/aisphereauth/client
+pkg/aisphereauth/gin
+```
+
+完整说明见：[docs/go-sdk.md](docs/go-sdk.md)。
+
+最小接入示例：
+
+```go
+authClient := client.NewHTTPClient(
+    "http://aisphere-auth:18080",
+    client.WithServiceToken(os.Getenv("AISPHERE_SERVICE_TOKEN")),
+)
+
+r.Use(authgin.RequireLogin(authClient, authgin.MiddlewareOptions{
+    App: "skillhub",
+    CacheTTL: 5 * time.Second,
+}))
+
+r.GET("/v3/admin/skills",
+    authgin.RequirePermission(authClient, "skillhub:skill:*", "admin:read"),
+    handler.ListSkills,
+)
+```
+
+非 Go 语言接入使用 OpenAPI：
+
+```text
+api/openapi.yaml
+```
+
+## 四、CLI 用法
 
 显示中文帮助：
 
@@ -229,7 +281,7 @@ python3 scripts/casdoor/prepare-casdoor-sql.py \
 ./aisphere-auth version
 ```
 
-## 四、离线 `.run` 交付
+## 五、离线 `.run` 交付
 
 本地构建：
 
@@ -255,17 +307,6 @@ bash build.sh --arch all
   --namespace aisphere-system
 ```
 
-## 五、设计边界
+## 六、设计边界
 
-Casdoor 仍然是账号、组织、角色、Permission、Policy 的来源。AI Sphere Auth 只做平台侧 Session、Principal 归一化、权限检查封装、服务端 SDK 和离线交付。
-
-后续重点：
-
-```text
-1. 多 Service Token / tokenID / 单服务撤销
-2. Prometheus metrics
-3. K8s PDB / HPA / NetworkPolicy / ServiceMonitor
-4. Refresh token 真刷新
-5. Casdoor global logout
-6. OpenAPI / 多语言 SDK
-```
+Casdoor 仍然是账号、组织、角色、Permission、Policy 的来源。AI Sphere Auth 只做平台侧 Session、Principal 归一化、权限检查封装、服务端 SDK、OpenAPI 契约和离线交付。
