@@ -76,7 +76,12 @@ Casdoor SQL 自动导入工具（PowerShell）
 "@
 }
 
-function Assert-Identifier([string]$Name, [string]$Value, [string]$Pattern) {
+function Test-AisphereIdentifier {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][string]$Value,
+    [Parameter(Mandatory = $true)][string]$Pattern
+  )
   if ($Value -notmatch $Pattern) {
     throw "invalid ${Name}: ${Value}"
   }
@@ -200,9 +205,9 @@ function Backup-Database {
   }
 }
 
-Assert-Identifier "database" $Database '^[A-Za-z0-9_]+$'
-Assert-Identifier "user" $User '^[A-Za-z0-9_-]+$'
-Assert-Identifier "port" ([string]$Port) '^[0-9]+$'
+Test-AisphereIdentifier -Name "database" -Value $Database -Pattern '^[A-Za-z0-9_]+$'
+Test-AisphereIdentifier -Name "user" -Value $User -Pattern '^[A-Za-z0-9_-]+$'
+Test-AisphereIdentifier -Name "port" -Value ([string]$Port) -Pattern '^[0-9]+$'
 if ($Seed -and $PrepareDump) { throw "-Seed and -PrepareDump are mutually exclusive" }
 
 if ($Seed) {
