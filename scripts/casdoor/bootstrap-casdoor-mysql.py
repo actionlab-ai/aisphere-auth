@@ -152,6 +152,23 @@ def render_seed(args: argparse.Namespace) -> None:
     run(cmd)
 
 
+def validate_seed_sql(sql: str) -> None:
+    required_fragments = [
+        "INSERT INTO `organization`",
+        "`nav_items`",
+        "`user_nav_items`",
+        "`widget_items`",
+        "`account_menu`",
+        "`account_items`",
+        '"name":"Organization"',
+        '"name":"Email"',
+        '"name":"Groups"',
+    ]
+    missing = [item for item in required_fragments if item not in sql]
+    if missing:
+        raise SystemExit("[ERROR] generated Casdoor seed SQL is missing required organization defaults: " + ", ".join(missing))
+
+
 def backup_path(args: argparse.Namespace) -> Path:
     if args.backup_output:
         return Path(args.backup_output)
@@ -344,6 +361,7 @@ def main() -> int:
 
     render_seed(args)
     sql = Path(args.output)
+    validate_seed_sql(sql.read_text(encoding="utf-8"))
     if args.seed_only:
         print(f"[OK] seed-only completed: {sql}")
         if args.env_output:

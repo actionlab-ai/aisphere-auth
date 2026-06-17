@@ -18,7 +18,7 @@ coverage.html
 .env.*
 !.env.example
 configs/config.yaml
-
+config.yaml
 # generated / sensitive Casdoor SQL
 casdoor.sql
 deployments/casdoor/sql/*.sql
@@ -39,3 +39,7 @@ $RECYCLE.BIN/
 
 # Logs
 *.log
+
+# Python helper cache
+__pycache__/
+*.py[cod]
