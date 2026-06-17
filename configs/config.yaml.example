@@ -35,6 +35,16 @@ server:
   # 对应环境变量：AISPHERE_AUTH_PUBLIC_BASE_URL
   publicBaseURL: "http://127.0.0.1:18080"
 
+  # 可信反向代理地址列表。
+  # 只有请求来源 IP 命中这里的 IP/CIDR 时，服务才信任 X-Forwarded-For / X-Real-IP。
+  # 留空表示不信任任何转发头，直接使用 RemoteAddr，适合裸跑或不确定代理链的环境。
+  # 示例：
+  #   - "127.0.0.1"
+  #   - "10.0.0.0/8"
+  #   - "192.168.0.0/16"
+  # 对应环境变量：AISPHERE_TRUSTED_PROXIES，环境变量写法：127.0.0.1,10.0.0.0/8
+  trustedProxies: []
+
 gateway:
   # Cookie Domain。
   # 单域名部署可留空，由浏览器按当前域名保存 Cookie。
@@ -242,9 +252,22 @@ internal:
   # 内部服务调用凭证。
   # SkillHub、AgentRuntime 等服务调用 /authz/check、/auth/sessions/introspect 时必须携带。
   # 生产环境必须通过 Secret 注入，不要提交真实值。
-  # 开发环境可先留空；需要模拟内部鉴权时再填写长随机字符串。
+  # 当 serviceTokenRequired=true 时，长度必须至少 32 位。
   # 对应环境变量：AISPHERE_SERVICE_TOKEN
   serviceToken: ""
+
+  # 内部 API 是否启用内存 token bucket 限流。
+  # 保护 /authz/check、/authz/batch-check、/auth/sessions/introspect，避免 token 泄露后被无限调用。
+  # 对应环境变量：AISPHERE_INTERNAL_RATE_LIMIT_ENABLED
+  rateLimitEnabled: true
+
+  # 内部 API 每个 IP / token 的每秒速率。
+  # 对应环境变量：AISPHERE_INTERNAL_RATE_LIMIT_QPS
+  rateLimitQPS: 100
+
+  # 内部 API 每个 IP / token 的突发桶大小。
+  # 对应环境变量：AISPHERE_INTERNAL_RATE_LIMIT_BURST
+  rateLimitBurst: 200
 
 audit:
   # 是否启用审计。
