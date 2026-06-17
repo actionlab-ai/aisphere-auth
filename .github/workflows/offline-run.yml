@@ -1,0 +1,75 @@
+name: offline-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Architecture to build"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - amd64
+          - arm64
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Skip unselected arch
+        id: selected
+        shell: bash
+        run: |
+          requested="${{ github.event.inputs.arch || 'all' }}"
+          arch="${{ matrix.arch }}"
+          if [[ "${requested}" != "all" && "${requested}" != "${arch}" ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.selected.outputs.build == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: steps.selected.outputs.build == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.selected.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build offline run package
+        if: steps.selected.outputs.build == 'true'
+        run: bash build.sh --arch ${{ matrix.arch }}
+
+      - name: Upload artifact
+        if: steps.selected.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aisphere-auth-run-${{ matrix.arch }}
+          path: |
+            dist/*.run
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Upload release assets
+        if: steps.selected.outputs.build == 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.run
+            dist/*.sha256
