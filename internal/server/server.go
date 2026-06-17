@@ -1,9 +1,15 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/actionlab-ai/aisphere-auth/internal/authn"
 	"github.com/actionlab-ai/aisphere-auth/internal/authz"
@@ -30,7 +36,37 @@ func New(cfg config.Config) *Server {
 	return s
 }
 
-func (s *Server) Run() error { return s.router.Run(s.cfg.Server.Addr) }
+func (s *Server) Run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	httpServer := &http.Server{
+		Addr:              s.cfg.Server.Addr,
+		Handler:           s.router,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info("aisphere-auth listening", "addr", s.cfg.Server.Addr)
+		err := httpServer.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		slog.Info("aisphere-auth shutting down")
+		return httpServer.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}
 
 func (s *Server) registerRoutes() {
 	casdoorClient := casdoor.NewHTTPClient(s.cfg.Casdoor)
