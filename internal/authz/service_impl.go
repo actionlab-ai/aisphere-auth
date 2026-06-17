@@ -33,13 +33,14 @@ func (s *DefaultService) Check(ctx context.Context, req CheckRequest) (*Decision
 	}
 	object := strings.TrimSpace(req.Object)
 	action := strings.TrimSpace(req.Action)
-	decision := &Decision{Source: "casdoor", Subject: subject, Object: object, Action: action}
+	decision := &Decision{Source: "casdoor", Subject: subject, Object: object, Action: action, TraceID: req.TraceID}
 	if subject == "" || object == "" || action == "" {
 		decision.Reason = ErrMissingPermission.Error()
 		return decision, ErrMissingPermission
 	}
 	if cached, ok := s.cache.Get(subject, object, action); ok {
 		cached.Source = "cache"
+		cached.TraceID = req.TraceID
 		return &cached, nil
 	}
 	resp, err := s.enforcer.Enforce(ctx, casdoor.EnforceRequest{PermissionID: s.cfg.Casdoor.PermissionID, Sub: subject, Obj: object, Act: action})
@@ -54,7 +55,9 @@ func (s *DefaultService) Check(ctx context.Context, req CheckRequest) (*Decision
 	if s.cfg.Authz.CacheEnabled {
 		ttl := time.Duration(s.cfg.Authz.CacheTTLSeconds) * time.Second
 		if ttl > 0 && ttl <= time.Minute {
-			s.cache.Set(subject, object, action, *decision, ttl)
+			cacheDecision := *decision
+			cacheDecision.TraceID = ""
+			s.cache.Set(subject, object, action, cacheDecision, ttl)
 		}
 	}
 	return decision, nil
