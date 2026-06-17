@@ -1,55 +1,252 @@
+# AI Sphere Auth 配置样例
+#
+# 使用方式：
+#   1. 复制本文件：cp configs/config.yaml.example configs/config.yaml
+#   2. 按实际环境修改 Casdoor、Redis、Cookie、Service Token 等参数。
+#   3. 启动服务：./aisphere-auth --config configs/config.yaml
+#
+# 配置优先级：
+#   命令行参数 > 环境变量 > 配置文件 > 默认值
+#
+# 常用命令：
+#   ./aisphere-auth -h
+#   ./aisphere-auth --config configs/config.yaml
+#   ./aisphere-auth check-config --config configs/config.yaml
+#   ./aisphere-auth --config configs/config.yaml --print-config
+
 server:
+  # 服务监听地址。
+  # 开发环境可以使用 ":18080"。
+  # 生产环境如果前面有网关，一般仍监听内网地址，例如 ":18080"。
+  # 对应环境变量：AISPHERE_AUTH_ADDR
   addr: ":18080"
+
+  # Gin 运行模式。
+  # 可选值：debug、release、test。
+  # 生产环境建议填写 release。
+  # 对应环境变量：AISPHERE_AUTH_MODE
   mode: "debug"
+
+  # 外部访问本 Auth 服务的基础地址。
+  # 这个地址会影响登录跳转、回调地址生成、文档展示等场景。
+  # 示例：
+  #   本地开发：http://127.0.0.1:18080
+  #   生产环境：https://auth.example.com
+  # 对应环境变量：AISPHERE_AUTH_PUBLIC_BASE_URL
   publicBaseURL: "http://127.0.0.1:18080"
 
 gateway:
+  # Cookie Domain。
+  # 单域名部署可留空，由浏览器按当前域名保存 Cookie。
+  # 多子域共享登录态时可填写根域，例如 ".example.com"。
+  # 示例：
+  #   auth.example.com / skillhub.example.com / agent.example.com 共享时填 ".example.com"。
+  # 对应环境变量：AISPHERE_COOKIE_DOMAIN
   cookieDomain: ""
+
+  # Cookie 是否启用 Secure。
+  # HTTPS 生产环境必须为 true。
+  # 本地 HTTP 开发环境可为 false，否则浏览器不会保存 Cookie。
+  # 对应环境变量：AISPHERE_COOKIE_SECURE
   cookieSecure: false
+
+  # Cookie SameSite 策略。
+  # 推荐值：Lax。
+  # 如果跨站点嵌入或特殊 SSO 场景可能需要 None，但 None 通常要求 Secure=true。
+  # 对应环境变量：AISPHERE_COOKIE_SAMESITE
   cookieSameSite: "Lax"
 
 casdoor:
+  # Casdoor 服务地址。
+  # 必须填写浏览器和 aisphere-auth 都能访问的地址。
+  # 本地开发示例：http://127.0.0.1:8000
+  # 容器访问宿主机示例：http://host.docker.internal:8000
+  # 生产环境示例：https://iam.example.com
+  # 对应环境变量：AISPHERE_CASDOOR_ENDPOINT
   endpoint: "http://127.0.0.1:8000"
+
+  # Casdoor Owner / Organization。
+  # 必须和 Casdoor 中 Application、Permission、User 所属 owner 对齐。
+  # 示例：skillhub、built-in、aisphere
+  # 对应环境变量：AISPHERE_CASDOOR_OWNER
   owner: "skillhub"
+
+  # Casdoor Application 名称。
+  # 不是 Client ID，而是 Casdoor 后台 Application 的 name。
+  # 示例：aisphere、skillhub
+  # 对应环境变量：AISPHERE_CASDOOR_APPLICATION
   application: "aisphere"
+
+  # Casdoor Application Client ID。
+  # 从 Casdoor 后台 Application 详情页复制。
+  # 不要随便填写，必须和 Casdoor 签发 token 的 audience 对齐。
+  # 对应环境变量：AISPHERE_CASDOOR_CLIENT_ID
   clientId: "change-me"
+
+  # Casdoor Application Client Secret。
+  # 生产环境建议通过环境变量或 Secret 注入，不建议明文提交到 Git。
+  # 对应环境变量：AISPHERE_CASDOOR_CLIENT_SECRET
   clientSecret: "change-me"
+
+  # Casdoor OAuth 回调地址。
+  # 必须和 Casdoor Application 中配置的 Redirect URI 完全一致。
+  # 本服务默认回调路径是 /auth/callback/casdoor。
+  # 示例：http://127.0.0.1:18080/auth/callback/casdoor
+  # 对应环境变量：AISPHERE_CASDOOR_REDIRECT_URL
   redirectURL: "http://127.0.0.1:18080/auth/callback/casdoor"
-  scopes: ["openid", "profile", "email"]
+
+  # OAuth scopes。
+  # 常规登录保持 openid、profile、email 即可。
+  # 对应环境变量：AISPHERE_CASDOOR_SCOPES，环境变量写法：openid,profile,email
+  scopes:
+    - "openid"
+    - "profile"
+    - "email"
+
+  # Casdoor Permission ID。
+  # 用于 /api/enforce 权限判断。
+  # 格式通常为：<owner>/<permissionName>
+  # 示例：skillhub/platform_permission
+  # 对应环境变量：AISPHERE_CASDOOR_PERMISSION_ID
   permissionId: "skillhub/platform_permission"
+
+  # Casdoor 权限主体格式。
+  # 当前推荐 owner-name，最终会生成类似 skillhub/admin 的 subject。
+  # 不建议业务系统自己拼 subject，应统一从 Principal.CasdoorSubject 获取。
+  # 对应环境变量：AISPHERE_CASDOOR_SUBJECT_FORMAT
   subjectFormat: "owner-name"
 
 session:
+  # Session 存储类型。
+  # 可选值：memory、redis。
+  # memory 只适合本地开发；生产环境必须使用 redis，支持多副本和重启保留。
+  # 对应环境变量：AISPHERE_SESSION_PROVIDER
   provider: "memory"
+
+  # 浏览器 Cookie 名称。
+  # AI Sphere 平台统一推荐 aisphere_session。
+  # 对应环境变量：AISPHERE_SESSION_COOKIE_NAME
   cookieName: "aisphere_session"
+
+  # Session 有效期，单位秒。
+  # 默认 28800 秒，即 8 小时。
+  # 对应环境变量：AISPHERE_SESSION_TTL_SECONDS
   ttlSeconds: 28800
+
+  # 是否启用滑动过期。
+  # true 表示用户持续访问时刷新 session TTL。
+  # 对应环境变量：AISPHERE_SESSION_SLIDING
   sliding: true
+
   redis:
-    addrs: ["127.0.0.1:6379"]
+    # Redis 地址列表。
+    # 单机示例：["127.0.0.1:6379"]
+    # 容器 compose 示例：["redis:6379"]
+    # 多地址预留给后续 sentinel/cluster 扩展，当前实现按第一个地址连接。
+    # 对应环境变量：AISPHERE_REDIS_ADDRS，环境变量写法：127.0.0.1:6379,127.0.0.2:6379
+    addrs:
+      - "127.0.0.1:6379"
+
+    # Redis 用户名。
+    # 未开启 ACL 时留空。
+    # 对应环境变量：AISPHERE_REDIS_USERNAME
     username: ""
+
+    # Redis 密码。
+    # 生产环境建议通过环境变量或 Secret 注入。
+    # 对应环境变量：AISPHERE_REDIS_PASSWORD
     password: ""
+
+    # Redis DB 编号。
+    # 单机 Redis 常用 0。
+    # 对应环境变量：AISPHERE_REDIS_DB
     db: 0
+
+    # Redis key 前缀。
+    # 最终 key 类似：aisphere:session:<session_id>
+    # 多环境共用 Redis 时建议按环境区分，例如 aisphere-dev、aisphere-prod。
+    # 对应环境变量：AISPHERE_REDIS_PREFIX
     prefix: "aisphere"
 
 authz:
+  # 权限提供方。
+  # 当前支持 casdoor。
+  # 后续可以扩展为 local、mock、opa 等。
+  # 对应环境变量：AISPHERE_AUTHZ_PROVIDER
   provider: "casdoor"
+
+  # 是否启用权限判断短缓存。
+  # 开启后可减少 Casdoor enforce 调用次数。
+  # 对应环境变量：AISPHERE_AUTHZ_CACHE_ENABLED
   cacheEnabled: true
+
+  # 权限缓存 TTL，单位秒。
+  # 建议 10~30 秒，不建议超过 60 秒。
+  # Casdoor policy 变化后，最多等待该 TTL 生效。
+  # 对应环境变量：AISPHERE_AUTHZ_CACHE_TTL_SECONDS
   cacheTTLSeconds: 30
+
+  # Casdoor / 权限源异常时是否默认拒绝。
+  # 生产环境必须为 true，避免权限系统异常时放大权限。
+  # 对应环境变量：AISPHERE_AUTHZ_FAIL_CLOSED
   failClosed: true
 
 token:
+  # 是否启用 AI Sphere 本地 Token 能力。
+  # 当前主要为后续 CLI、AgentRuntime、服务间调用预留。
+  # Web 控制台主链路仍使用 HttpOnly Cookie + Redis Session。
+  # 对应环境变量：AISPHERE_TOKEN_ENABLED
   enabled: true
+
+  # Token issuer。
+  # 后续 JWT iss 字段会使用该值。
+  # 对应环境变量：AISPHERE_TOKEN_ISSUER
   issuer: "aisphere-auth"
-  audience: ["aisphere"]
+
+  # Token audience。
+  # 后续 JWT aud 字段会使用该值。
+  # 对应环境变量：AISPHERE_TOKEN_AUDIENCE，环境变量写法：aisphere,skillhub
+  audience:
+    - "aisphere"
+
+  # JWT 算法。
+  # 当前预留 HS256，后续生产建议扩展 RS256/JWKS。
+  # 对应环境变量：AISPHERE_TOKEN_ALG
   alg: "HS256"
+
+  # JWT 签名密钥。
+  # 生产环境必须替换为长随机字符串，并通过 Secret 注入。
+  # 对应环境变量：AISPHERE_JWT_SECRET
   signingSecret: "change-me"
+
+  # Access Token 有效期，单位秒。
+  # 对应环境变量：AISPHERE_ACCESS_TOKEN_TTL_SECONDS
   accessTokenTTLSeconds: 3600
 
 internal:
+  # 是否强制校验内部服务调用凭证。
+  # 生产环境建议 true。
+  # 如果 serviceToken 非空，即使这里为 false，服务也会启用校验。
+  # 对应环境变量：AISPHERE_SERVICE_TOKEN_REQUIRED
   serviceTokenRequired: false
+
+  # 内部服务调用凭证 Header 名。
+  # SDK 默认使用 X-Aisphere-Service-Token。
+  # 也支持 Authorization: Bearer <token> 作为兼容方案。
+  # 对应环境变量：AISPHERE_SERVICE_TOKEN_HEADER
   serviceTokenHeader: "X-Aisphere-Service-Token"
+
+  # 内部服务调用凭证。
+  # SkillHub、AgentRuntime 等服务调用 /authz/check、/auth/sessions/introspect 时必须携带。
+  # 生产环境必须通过 Secret 注入，不要提交真实值。
+  # 对应环境变量：AISPHERE_SERVICE_TOKEN
   serviceToken: "change-me-in-production"
 
 audit:
+  # 是否启用审计。
+  # 当前保留配置，后续会用于登录、登出、权限检查、token 签发等审计日志。
   enabled: true
+
+  # 审计输出提供方。
+  # 当前预留 logger，后续可扩展为 db、kafka、loki、otel 等。
   provider: "logger"
