@@ -17,11 +17,12 @@ This repository now includes the first runnable auth service implementation:
 - `aisphere_session` HttpOnly cookie
 - `/auth/me`
 - `/auth/logout`
-- `/auth/sessions/introspect`
-- `/authz/check`
-- `/authz/batch-check`
+- service-protected `/auth/sessions/introspect`
+- service-protected `/authz/check`
+- service-protected `/authz/batch-check`
 - short-TTL in-memory authz decision cache
 - public `pkg/aisphereauth` HTTP client and Gin middleware skeleton
+- GitHub Actions CI for `gofmt`, `go vet` and `go test ./...`
 
 ## Run locally with memory session
 
@@ -71,13 +72,42 @@ Login test:
 open 'http://127.0.0.1:18080/auth/login?app=skillhub&redirect=/'
 ```
 
+## Internal service credential
+
+`SkillHub`, `AgentRuntime`, `SQLHub` and other trusted components call internal APIs such as `/auth/sessions/introspect` and `/authz/check`. Enable the service credential before exposing the service beyond local development:
+
+```bash
+export AISPHERE_SERVICE_TOKEN_REQUIRED=true
+export AISPHERE_SERVICE_TOKEN='replace-with-long-random-secret'
+export AISPHERE_SERVICE_TOKEN_HEADER='X-Aisphere-Service-Token'
+```
+
+SDK usage:
+
+```go
+client := client.NewHTTPClient(
+    "http://aisphere-auth:18080",
+    client.WithServiceToken(os.Getenv("AISPHERE_SERVICE_TOKEN")),
+)
+```
+
+HTTP usage:
+
+```bash
+curl -X POST http://127.0.0.1:18080/authz/check \
+  -H 'Content-Type: application/json' \
+  -H "X-Aisphere-Service-Token: $AISPHERE_SERVICE_TOKEN" \
+  -d '{"subject":"skillhub/admin","object":"skillhub:skill:*","action":"admin:read"}'
+```
+
 ## Design boundary
 
 Casdoor remains the source of users, roles and policies. AI Sphere Auth owns local platform sessions, principal normalization and the reusable service/SDK boundary for business services.
 
 ## Next milestones
 
-1. Add production Redis session hardening and service credentials for internal APIs.
+1. Harden Redis readiness checks and session sliding TTL behavior.
 2. Add `casdoor-go-sdk` adapter beside the current HTTP fallback.
 3. Add API token / JWT issuance for AgentRuntime, CLI and service-to-service calls.
 4. Add Casdoor config-as-code scripts for model, permission, role and policy initialization.
+5. Start SkillHub integration using `pkg/aisphereauth/gin` middleware.
