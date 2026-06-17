@@ -25,6 +25,9 @@ func (h *Handler) Check(c *gin.Context) {
 		httpx.RespondError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if req.TraceID == "" {
+		req.TraceID = httpx.RequestID(c)
+	}
 	if req.Subject == "" {
 		if sid, err := c.Cookie(h.cfg.Session.CookieName); err == nil && sid != "" {
 			p, _ := h.authn.Current(c.Request.Context(), sid)
@@ -55,6 +58,7 @@ func (h *Handler) BatchCheck(c *gin.Context) {
 		httpx.RespondError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	requestID := httpx.RequestID(c)
 	if sid, err := c.Cookie(h.cfg.Session.CookieName); err == nil && sid != "" {
 		if p, err := h.authn.Current(c.Request.Context(), sid); err == nil {
 			for i := range body.Checks {
@@ -64,6 +68,11 @@ func (h *Handler) BatchCheck(c *gin.Context) {
 			}
 		}
 	}
+	for i := range body.Checks {
+		if body.Checks[i].TraceID == "" {
+			body.Checks[i].TraceID = requestID
+		}
+	}
 	decisions, err := h.authz.BatchCheck(c.Request.Context(), body.Checks)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{
@@ -71,7 +80,7 @@ func (h *Handler) BatchCheck(c *gin.Context) {
 			"error": gin.H{
 				"code":    "forbidden",
 				"message": err.Error(),
-				"traceId": httpx.RequestID(c),
+				"traceId": requestID,
 			},
 		})
 		return
