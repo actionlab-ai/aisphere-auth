@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/actionlab-ai/aisphere-auth/internal/casdoor"
 	"github.com/actionlab-ai/aisphere-auth/internal/config"
@@ -75,6 +76,9 @@ func (s *DefaultService) LoginURL(ctx context.Context, req LoginURLRequest) (*Lo
 }
 
 func (s *DefaultService) HandleCallback(ctx context.Context, req CallbackRequest) (*CallbackResponse, error) {
+	if len(req.State) == 0 || len(req.State) > 128 {
+		return nil, ErrInvalidState
+	}
 	st, err := s.states.Consume(ctx, req.State)
 	if err != nil {
 		return nil, ErrInvalidState
@@ -101,7 +105,7 @@ func (s *DefaultService) HandleCallback(ctx context.Context, req CallbackRequest
 		UpdatedAt:       time.Now(),
 		ExpiresAt:       expiresAt,
 		UserAgent:       userAgent(req.Request),
-		ClientIP:        clientIP(req.Request),
+		ClientIP:        clientIP(req.Request, s.cfg.Server.TrustedProxies),
 	}
 	if err := s.sessions.Create(ctx, sess, time.Until(expiresAt)); err != nil {
 		return nil, err
@@ -150,7 +154,7 @@ func randomState() (string, error) {
 
 func normalizeRedirect(value string, fallback string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(value, "//") || strings.HasPrefix(value, "/\\") || strings.Contains(value, "\\") {
+	if value == "" || strings.HasPrefix(value, "//") || strings.HasPrefix(value, "/\\") || strings.Contains(value, "\\") || containsControl(value) {
 		return fallback
 	}
 	u, err := url.Parse(value)
@@ -160,6 +164,15 @@ func normalizeRedirect(value string, fallback string) string {
 	return value
 }
 
+func containsControl(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
 func userAgent(r *http.Request) string {
 	if r == nil {
 		return ""
@@ -167,26 +180,57 @@ func userAgent(r *http.Request) string {
 	return r.UserAgent()
 }
 
-func clientIP(r *http.Request) string {
+func clientIP(r *http.Request, trustedProxies []string) string {
 	if r == nil {
 		return ""
 	}
-	if value := firstHeaderIP(r.Header.Get("X-Forwarded-For")); value != "" {
-		return value
+	remote := remoteHost(r.RemoteAddr)
+	if isTrustedProxy(remote, trustedProxies) {
+		if value := firstHeaderIP(r.Header.Get("X-Forwarded-For")); value != "" {
+			return value
+		}
+		if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
+			return value
+		}
 	}
-	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
-		return value
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+	return remote
+}
+
+func remoteHost(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
 		return host
 	}
-	return r.RemoteAddr
+	return remoteAddr
+}
+
+func isTrustedProxy(remote string, trustedProxies []string) bool {
+	ip := net.ParseIP(strings.TrimSpace(remote))
+	if ip == nil {
+		return false
+	}
+	for _, item := range trustedProxies {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if strings.Contains(item, "/") {
+			_, cidr, err := net.ParseCIDR(item)
+			if err == nil && cidr.Contains(ip) {
+				return true
+			}
+			continue
+		}
+		if trustedIP := net.ParseIP(item); trustedIP != nil && trustedIP.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstHeaderIP(value string) string {
 	for _, part := range strings.Split(value, ",") {
 		part = strings.TrimSpace(part)
-		if part != "" {
+		if net.ParseIP(part) != nil {
 			return part
 		}
 	}
