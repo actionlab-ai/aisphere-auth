@@ -1,7 +1,9 @@
 package server
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"net/http"
 	"strings"
 
@@ -17,8 +19,16 @@ func requireServiceToken(cfg config.Config) gin.HandlerFunc {
 
 	required := cfg.Internal.ServiceTokenRequired || strings.TrimSpace(cfg.Internal.ServiceToken) != ""
 	expected := strings.TrimSpace(cfg.Internal.ServiceToken)
+	expectedHash := sha256.Sum256([]byte(expected))
+	limiter := newTokenBucketLimiter(cfg.Internal)
 
 	return func(c *gin.Context) {
+		if !limiter.Allow("ip:" + c.ClientIP()) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate_limited", "message": "too many requests"})
+			c.Abort()
+			return
+		}
+
 		if !required {
 			c.Next()
 			return
@@ -38,7 +48,14 @@ func requireServiceToken(cfg config.Config) gin.HandlerFunc {
 			actual = bearerToken(c.GetHeader("Authorization"))
 		}
 
-		if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+		if actual != "" && !limiter.Allow("token:"+hashForRateLimit(actual)) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate_limited", "message": "too many requests"})
+			c.Abort()
+			return
+		}
+
+		actualHash := sha256.Sum256([]byte(actual))
+		if subtle.ConstantTimeCompare(actualHash[:], expectedHash[:]) != 1 {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized", "message": "invalid service credential"})
 			c.Abort()
 			return
@@ -58,4 +75,9 @@ func bearerToken(value string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[1])
+}
+
+func hashForRateLimit(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:8])
 }
