@@ -17,6 +17,8 @@ The project follows semantic versioning after the first tagged release. Before `
 - Short TTL local introspection cache in Gin middleware.
 - SDK sentinel errors such as `ErrInactiveSession` and `ErrPermissionDenied`.
 - SDK HTTP options for timeout, service token header, error body limit and instrumentation hook.
+- Audit event contract, audit HTTP endpoints and Go SDK audit write/query methods.
+- Gin helper for building audit events from the current request and principal.
 - OpenAPI contract at `api/openapi.yaml` for non-Go SDK generation.
 - Offline `.run` package build and install flow.
 - Casdoor seed SQL renderer and import helpers.
