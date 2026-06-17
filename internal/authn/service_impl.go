@@ -5,7 +5,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -112,12 +115,16 @@ func (s *DefaultService) Current(ctx context.Context, sessionID string) (*princi
 		return nil, ErrNoSession
 	}
 	if time.Now().After(sess.ExpiresAt) {
-		_ = s.sessions.Delete(ctx, sessionID)
+		if err := s.sessions.Delete(ctx, sessionID); err != nil {
+			slog.Warn("delete expired session failed", "session_id", sessionID, "error", err)
+		}
 		return nil, ErrNoSession
 	}
 	if s.cfg.Session.Sliding {
 		ttl := time.Duration(s.cfg.Session.TTLSeconds) * time.Second
-		_ = s.sessions.Touch(ctx, sessionID, ttl)
+		if err := s.sessions.Touch(ctx, sessionID, ttl); err != nil {
+			slog.Warn("touch session failed", "session_id", sessionID, "error", err)
+		}
 	}
 	return sess.Principal, nil
 }
@@ -143,7 +150,11 @@ func randomState() (string, error) {
 
 func normalizeRedirect(value string, fallback string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || !strings.HasPrefix(value, "/") {
+	if value == "" || strings.HasPrefix(value, "//") || strings.HasPrefix(value, `/\\`) || strings.Contains(value, `\\`) {
+		return fallback
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/") {
 		return fallback
 	}
 	return value
@@ -160,5 +171,24 @@ func clientIP(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
+	if value := firstHeaderIP(r.Header.Get("X-Forwarded-For")); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
+		return value
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
 	return r.RemoteAddr
+}
+
+func firstHeaderIP(value string) string {
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			return part
+		}
+	}
+	return ""
 }
