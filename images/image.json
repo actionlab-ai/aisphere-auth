@@ -1,0 +1,20 @@
+[
+  {
+    "name": "aisphere-auth",
+    "arch": "amd64",
+    "platform": "linux/amd64",
+    "dockerfile": "deployments/docker/Dockerfile",
+    "context": ".",
+    "tag": "sealos.hub:5000/aisphere/aisphere-auth:${VERSION}-amd64",
+    "tar": "aisphere-auth-amd64.tar"
+  },
+  {
+    "name": "aisphere-auth",
+    "arch": "arm64",
+    "platform": "linux/arm64",
+    "dockerfile": "deployments/docker/Dockerfile",
+    "context": ".",
+    "tag": "sealos.hub:5000/aisphere/aisphere-auth:${VERSION}-arm64",
+    "tar": "aisphere-auth-arm64.tar"
+  }
+]
