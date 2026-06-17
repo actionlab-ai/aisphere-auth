@@ -27,6 +27,9 @@ services:
       AISPHERE_CASDOOR_CLIENT_SECRET: "change-me"
       AISPHERE_CASDOOR_REDIRECT_URL: "http://127.0.0.1:18080/auth/callback/casdoor"
       AISPHERE_CASDOOR_PERMISSION_ID: "skillhub/platform_permission"
+      AISPHERE_SERVICE_TOKEN_REQUIRED: "true"
+      AISPHERE_SERVICE_TOKEN: "dev-service-token-change-me"
+      AISPHERE_SERVICE_TOKEN_HEADER: "X-Aisphere-Service-Token"
     ports:
       - "18080:18080"
     depends_on:
