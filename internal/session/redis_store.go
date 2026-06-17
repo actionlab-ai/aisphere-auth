@@ -17,6 +17,22 @@ type RedisStore struct {
 	prefix string
 }
 
+var redisDeleteSessionScript = redis.NewScript(`
+local payload = redis.call("GET", KEYS[1])
+if payload then
+  local ok, sess = pcall(cjson.decode, payload)
+  if ok and sess and sess["Principal"] then
+    local principal = sess["Principal"]
+    local subject = principal["subjectId"] or principal["SubjectID"]
+    if subject and subject ~= "" then
+      redis.call("SREM", ARGV[1] .. ":session_subject:" .. subject, ARGV[2])
+    end
+  end
+end
+redis.call("DEL", KEYS[1])
+return 1
+`)
+
 func NewRedisStore(cfg config.RedisConfig) (*RedisStore, error) {
 	addr := "127.0.0.1:6379"
 	if len(cfg.Addrs) > 0 && strings.TrimSpace(cfg.Addrs[0]) != "" {
@@ -94,16 +110,11 @@ func (s *RedisStore) Update(ctx context.Context, sess *Session, ttl time.Duratio
 }
 
 func (s *RedisStore) Delete(ctx context.Context, sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
 		return nil
 	}
-	sess, _ := s.Get(ctx, sessionID)
-	pipe := s.client.TxPipeline()
-	pipe.Del(ctx, s.sessionKey(sessionID))
-	if sess != nil && sess.Principal != nil && sess.Principal.SubjectID != "" {
-		pipe.SRem(ctx, s.subjectKey(sess.Principal.SubjectID), sessionID)
-	}
-	_, err := pipe.Exec(ctx)
+	_, err := redisDeleteSessionScript.Run(ctx, s.client, []string{s.sessionKey(sessionID)}, s.prefix, sessionID).Result()
 	return err
 }
 
