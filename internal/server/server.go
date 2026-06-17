@@ -1,7 +1,9 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/actionlab-ai/aisphere-auth/internal/authn"
 	"github.com/actionlab-ai/aisphere-auth/internal/authz"
@@ -32,7 +34,7 @@ func (s *Server) Run() error { return s.router.Run(s.cfg.Server.Addr) }
 
 func (s *Server) registerRoutes() {
 	casdoorClient := casdoor.NewHTTPClient(s.cfg.Casdoor)
-	sessionStore := session.NewMemoryStore()
+	sessionStore := mustBuildSessionStore(s.cfg)
 	stateStore := authn.NewMemoryStateStore()
 	authnSvc := authn.NewDefaultService(authn.ServiceOptions{Config: s.cfg, Casdoor: casdoorClient, SessionStore: sessionStore, StateStore: stateStore})
 	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient)
@@ -57,5 +59,20 @@ func (s *Server) registerRoutes() {
 	{
 		authzGroup.POST("/check", authzHandler.Check)
 		authzGroup.POST("/batch-check", authzHandler.BatchCheck)
+	}
+}
+
+func mustBuildSessionStore(cfg config.Config) session.Store {
+	switch strings.ToLower(strings.TrimSpace(cfg.Session.Provider)) {
+	case "", "memory":
+		return session.NewMemoryStore()
+	case "redis":
+		store, err := session.NewRedisStore(cfg.Session.Redis)
+		if err != nil {
+			panic(fmt.Errorf("initialize redis session store: %w", err))
+		}
+		return store
+	default:
+		panic(fmt.Errorf("unsupported session provider: %s", cfg.Session.Provider))
 	}
 }
