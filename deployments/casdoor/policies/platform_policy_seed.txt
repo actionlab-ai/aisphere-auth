@@ -1,0 +1,8 @@
+platform-admin -> * -> *
+skillhub-admin -> skillhub:* -> *
+skillhub-developer -> skillhub:skill:* -> read/create/update
+skillhub-reviewer -> skillhub:proposal:* -> read/approve/reject
+skillhub-viewer -> skillhub:* -> read
+agentruntime-admin -> agentruntime:* -> *
+agentruntime-operator -> agentruntime:run:* -> execute/stop
+agentruntime-viewer -> agentruntime:* -> read
