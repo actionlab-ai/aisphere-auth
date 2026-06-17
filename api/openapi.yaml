@@ -3,8 +3,7 @@ info:
   title: AI Sphere Auth API
   version: 0.1.0
   description: |
-    AI Sphere unified AuthN/AuthZ API. This contract is intended for generating
-    non-Go SDKs for SkillHub, AgentRuntime, SQLHub, ModelGateway and Portal.
+    AI Sphere unified AuthN/AuthZ/Audit API.
 servers:
   - url: http://127.0.0.1:18080
 security:
@@ -111,7 +110,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/IntrospectResponse'
         '401':
-          description: Missing or invalid service token
+          description: Unauthorized
   /authz/check:
     post:
       summary: Check one authorization decision
@@ -129,7 +128,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Decision'
         '401':
-          description: Missing or invalid service token
+          description: Unauthorized
         '403':
           description: Denied or backend error
   /authz/batch-check:
@@ -158,6 +157,70 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Decision'
+  /audit/events:
+    post:
+      summary: Write an audit event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEvent'
+      responses:
+        '201':
+          description: Stored audit event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEvent'
+        '400':
+          description: Invalid audit event
+    get:
+      summary: Query audit events, newest first
+      parameters:
+        - name: traceId
+          in: query
+          schema:
+            type: string
+        - name: actorSubject
+          in: query
+          schema:
+            type: string
+        - name: app
+          in: query
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: result
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Audit event list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditListResponse'
 components:
   securitySchemes:
     serviceToken:
@@ -253,3 +316,59 @@ components:
           type: string
         traceId:
           type: string
+    AuditEvent:
+      type: object
+      required:
+        - actorSubject
+        - resourceType
+        - action
+        - result
+      properties:
+        id:
+          type: string
+        traceId:
+          type: string
+        actorSubject:
+          type: string
+        actorName:
+          type: string
+        app:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        action:
+          type: string
+        result:
+          type: string
+        reason:
+          type: string
+        ip:
+          type: string
+        userAgent:
+          type: string
+        requestPath:
+          type: string
+        requestMethod:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+    AuditListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
