@@ -23,13 +23,11 @@ func requireServiceToken(cfg config.Config) gin.HandlerFunc {
 	limiter := newTokenBucketLimiter(cfg.Internal)
 
 	return func(c *gin.Context) {
-		if !limiter.Allow("ip:" + c.ClientIP()) {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate_limited", "message": "too many requests"})
-			c.Abort()
-			return
-		}
-
 		if !required {
+			if !allowRate(limiter, "ip:"+c.ClientIP()) {
+				respondRateLimited(c)
+				return
+			}
 			c.Next()
 			return
 		}
@@ -48,8 +46,16 @@ func requireServiceToken(cfg config.Config) gin.HandlerFunc {
 			actual = bearerToken(c.GetHeader("Authorization"))
 		}
 
-		if actual != "" && !limiter.Allow("token:"+hashForRateLimit(actual)) {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate_limited", "message": "too many requests"})
+		// Required-token mode uses a credential-derived limiter key. Valid and invalid
+		// tokens are rate-limited independently, and empty credentials still hit a
+		// missing-token bucket keyed by client IP instead of bypassing rate limiting.
+		if !allowRate(limiter, serviceCredentialRateKey(c.ClientIP(), actual)) {
+			respondRateLimited(c)
+			return
+		}
+
+		if actual == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized", "message": "missing service credential"})
 			c.Abort()
 			return
 		}
@@ -63,6 +69,22 @@ func requireServiceToken(cfg config.Config) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func allowRate(limiter *tokenBucketLimiter, key string) bool {
+	return limiter == nil || limiter.Allow(key)
+}
+
+func respondRateLimited(c *gin.Context) {
+	c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate_limited", "message": "too many requests"})
+	c.Abort()
+}
+
+func serviceCredentialRateKey(clientIP string, token string) string {
+	if strings.TrimSpace(token) == "" {
+		return "missing-token:ip:" + clientIP
+	}
+	return "token:" + hashForRateLimit(token)
 }
 
 func bearerToken(value string) string {
