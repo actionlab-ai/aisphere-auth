@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/actionlab-ai/aisphere-auth/internal/audit"
 	"github.com/actionlab-ai/aisphere-auth/internal/authn"
 	"github.com/actionlab-ai/aisphere-auth/internal/authz"
 	"github.com/actionlab-ai/aisphere-auth/internal/casdoor"
@@ -81,7 +82,8 @@ func (s *Server) registerRoutes() {
 	casdoorClient := casdoor.NewHTTPClient(s.cfg.Casdoor)
 	sessionStore := mustBuildSessionStore(s.cfg)
 	stateStore := mustBuildStateStore(s.cfg)
-	s.closers = append(s.closers, sessionStore)
+	auditSvc := audit.NewMemoryService(audit.MemoryOptions{})
+	s.closers = append(s.closers, sessionStore, auditSvc)
 	if c, ok := stateStore.(closeable); ok {
 		s.closers = append(s.closers, c)
 	}
@@ -90,6 +92,7 @@ func (s *Server) registerRoutes() {
 	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient)
 	authnHandler := authn.NewHandler(s.cfg, authnSvc)
 	authzHandler := authz.NewHandler(s.cfg, authnSvc, authzSvc)
+	auditHandler := audit.NewHandler(auditSvc)
 	internalAuth := requireServiceToken(s.cfg)
 
 	s.router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
@@ -115,6 +118,12 @@ func (s *Server) registerRoutes() {
 	{
 		authzGroup.POST("/check", authzHandler.Check)
 		authzGroup.POST("/batch-check", authzHandler.BatchCheck)
+	}
+
+	auditGroup := s.router.Group("/audit", internalAuth)
+	{
+		auditGroup.POST("/events", auditHandler.Write)
+		auditGroup.GET("/events", auditHandler.List)
 	}
 }
 
