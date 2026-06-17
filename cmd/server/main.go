@@ -147,11 +147,7 @@ func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 		"service-token-required": "internal.serviceTokenRequired",
 	}
 	for flagName, key := range bindings {
-		flag := cmd.Flags().Lookup(flagName)
-		if flag == nil {
-			flag = cmd.PersistentFlags().Lookup(flagName)
-		}
-		if flag != nil {
+		if flag := cmd.Flag(flagName); flag != nil {
 			_ = v.BindPFlag(key, flag)
 		}
 	}
