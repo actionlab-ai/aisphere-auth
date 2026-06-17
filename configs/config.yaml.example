@@ -1,0 +1,50 @@
+server:
+  addr: ":18080"
+  mode: "debug"
+  publicBaseURL: "http://127.0.0.1:18080"
+
+gateway:
+  cookieDomain: ""
+  cookieSecure: false
+  cookieSameSite: "Lax"
+
+casdoor:
+  endpoint: "http://127.0.0.1:8000"
+  owner: "skillhub"
+  application: "aisphere"
+  clientId: "change-me"
+  clientSecret: "change-me"
+  redirectURL: "http://127.0.0.1:18080/auth/callback/casdoor"
+  scopes: ["openid", "profile", "email"]
+  permissionId: "skillhub/platform_permission"
+  subjectFormat: "owner-name"
+
+session:
+  provider: "memory"
+  cookieName: "aisphere_session"
+  ttlSeconds: 28800
+  sliding: true
+  redis:
+    addrs: ["127.0.0.1:6379"]
+    username: ""
+    password: ""
+    db: 0
+    prefix: "aisphere"
+
+authz:
+  provider: "casdoor"
+  cacheEnabled: true
+  cacheTTLSeconds: 30
+  failClosed: true
+
+token:
+  enabled: true
+  issuer: "aisphere-auth"
+  audience: ["aisphere"]
+  alg: "HS256"
+  signingSecret: "change-me"
+  accessTokenTTLSeconds: 3600
+
+audit:
+  enabled: true
+  provider: "logger"
