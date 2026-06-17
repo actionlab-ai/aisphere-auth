@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/actionlab-ai/aisphere-auth/internal/casdoor"
 	"github.com/actionlab-ai/aisphere-auth/internal/config"
@@ -14,10 +15,15 @@ var ErrMissingPermission = errors.New("missing subject/object/action")
 type DefaultService struct {
 	cfg      config.Config
 	enforcer casdoor.Enforcer
+	cache    *DecisionCache
 }
 
 func NewDefaultService(cfg config.Config, enforcer casdoor.Enforcer) *DefaultService {
-	return &DefaultService{cfg: cfg, enforcer: enforcer}
+	var cache *DecisionCache
+	if cfg.Authz.CacheEnabled {
+		cache = NewDecisionCache()
+	}
+	return &DefaultService{cfg: cfg, enforcer: enforcer, cache: cache}
 }
 
 func (s *DefaultService) Check(ctx context.Context, req CheckRequest) (*Decision, error) {
@@ -32,6 +38,10 @@ func (s *DefaultService) Check(ctx context.Context, req CheckRequest) (*Decision
 		decision.Reason = ErrMissingPermission.Error()
 		return decision, ErrMissingPermission
 	}
+	if cached, ok := s.cache.Get(subject, object, action); ok {
+		cached.Source = "cache"
+		return &cached, nil
+	}
 	resp, err := s.enforcer.Enforce(ctx, casdoor.EnforceRequest{PermissionID: s.cfg.Casdoor.PermissionID, Sub: subject, Obj: object, Act: action})
 	if err != nil {
 		decision.Reason = err.Error()
@@ -40,6 +50,12 @@ func (s *DefaultService) Check(ctx context.Context, req CheckRequest) (*Decision
 	decision.Allow = resp != nil && resp.Allow
 	if !decision.Allow {
 		decision.Reason = "casdoor_denied"
+	}
+	if s.cfg.Authz.CacheEnabled {
+		ttl := time.Duration(s.cfg.Authz.CacheTTLSeconds) * time.Second
+		if ttl > 0 && ttl <= time.Minute {
+			s.cache.Set(subject, object, action, *decision, ttl)
+		}
 	}
 	return decision, nil
 }
