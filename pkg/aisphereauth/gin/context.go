@@ -20,10 +20,20 @@ func CurrentPrincipal(c *gin.Context) (*aisphereauth.Principal, bool) {
 	return p, ok
 }
 
-func MustPrincipal(c *gin.Context) *aisphereauth.Principal {
+func Principal(c *gin.Context) (*aisphereauth.Principal, error) {
 	p, ok := CurrentPrincipal(c)
 	if !ok || p == nil {
-		panic(aisphereauth.ErrNoPrincipal)
+		return nil, aisphereauth.ErrNoPrincipal
+	}
+	return p, nil
+}
+
+// MustPrincipal is kept for backward compatibility. New code should prefer
+// Principal or CurrentPrincipal to avoid panic-based control flow.
+func MustPrincipal(c *gin.Context) *aisphereauth.Principal {
+	p, err := Principal(c)
+	if err != nil {
+		panic(err)
 	}
 	return p
 }
