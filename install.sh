@@ -125,7 +125,7 @@ SKIP_PUSH="false"
 SKIP_APPLY="false"
 DRY_RUN="false"
 OUTPUT_DIR=""
-PUBLIC_BASE_URL="http://aisphere-auth.${NAMESPACE}.svc.cluster.local:18080"
+PUBLIC_BASE_URL=""
 COOKIE_DOMAIN=""
 COOKIE_SECURE="false"
 AUTH_MODE="release"
@@ -195,6 +195,7 @@ if [[ "${SKIP_APPLY}" != "true" && "${DRY_RUN}" != "true" ]]; then
   need_cmd kubectl
 fi
 
+if [[ -z "${PUBLIC_BASE_URL}" ]]; then PUBLIC_BASE_URL="http://aisphere-auth.${NAMESPACE}.svc.cluster.local:18080"; fi
 if [[ -z "${SERVICE_TOKEN}" ]]; then SERVICE_TOKEN="$(rand_secret)"; fi
 if [[ -z "${JWT_SECRET}" ]]; then JWT_SECRET="$(rand_secret)"; fi
 if [[ -z "${CASDOOR_REDIRECT_URL}" ]]; then CASDOOR_REDIRECT_URL="${PUBLIC_BASE_URL%/}/auth/callback/casdoor"; fi
