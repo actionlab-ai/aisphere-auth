@@ -23,6 +23,7 @@ This repository now includes the first runnable auth service implementation:
 - short-TTL in-memory authz decision cache
 - public `pkg/aisphereauth` HTTP client and Gin middleware skeleton
 - GitHub Actions CI for `gofmt`, `go vet` and `go test ./...`
+- offline `.run` package builder and installer
 
 ## Run locally with memory session
 
@@ -53,6 +54,50 @@ Or use docker compose:
 cd deployments/docker
 docker compose up --build
 ```
+
+## Offline `.run` package
+
+Build offline packages locally:
+
+```bash
+bash build.sh --arch amd64
+bash build.sh --arch arm64
+bash build.sh --arch all
+```
+
+Install into an offline Kubernetes environment and push images to the target registry:
+
+```bash
+./dist/aisphere-auth-0.1.0-amd64.run install -y \
+  --registry sealos.hub:5000 \
+  --namespace aisphere-system
+```
+
+Use another registry:
+
+```bash
+./dist/aisphere-auth-0.1.0-amd64.run install -y \
+  --registry 10.10.10.10:5000 \
+  --namespace aisphere-system
+```
+
+Render only:
+
+```bash
+./dist/aisphere-auth-0.1.0-amd64.run install -y \
+  --registry sealos.hub:5000 \
+  --skip-push \
+  --skip-apply \
+  --output-dir ./out
+```
+
+More details: [docs/offline-run.md](docs/offline-run.md).
+
+## GitHub Actions
+
+- `.github/workflows/ci.yml` runs `gofmt`, `go vet` and `go test ./...`.
+- `.github/workflows/offline-run.yml` builds `amd64` and `arm64` `.run` packages.
+- Tag pushes matching `v*` attach `.run` and `.sha256` files to GitHub Release.
 
 ## Casdoor environment
 
