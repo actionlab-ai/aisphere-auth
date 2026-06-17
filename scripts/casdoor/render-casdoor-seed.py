@@ -2,8 +2,8 @@
 """Render project-specific Casdoor bootstrap SQL for AI Sphere Auth.
 
 This tool creates an idempotent baseline for the current project: organization,
-OAuth application, Casbin model, common roles, common permissions and optional
-role-user binding.
+OAuth application, Casbin model, common roles, common permissions/policies,
+permission_rule rows and optional role-user binding.
 
 The generated SQL is intentionally not committed as an environment-specific file.
 Use command-line parameters or CI/CD secrets to inject endpoint-specific values
@@ -39,34 +39,59 @@ m = (g(r.sub, p.sub) || r.sub == p.sub) &&
 COMMON_ROLES = [
     ("role_platform_admin", "平台管理员", "平台全局管理员，允许所有对象和动作"),
     ("role_platform_viewer", "平台只读", "平台全局只读角色"),
+    ("role_audit_admin", "审计管理员", "可查询所有平台审计记录"),
+    ("role_audit_viewer", "审计只读", "可只读查询平台审计记录"),
+    ("role_security_admin", "安全管理员", "可管理认证、授权、审计相关配置"),
     ("role_skillhub_admin", "SkillHub 管理员", "SkillHub 全部管理权限"),
-    ("role_skillhub_editor", "SkillHub 编辑者", "SkillHub 技能、知识库等写入权限"),
+    ("role_skillhub_editor", "SkillHub 编辑者", "SkillHub 技能、分组、发布、提案等写入权限"),
     ("role_skillhub_viewer", "SkillHub 只读", "SkillHub 只读权限"),
     ("role_agentruntime_admin", "AgentRuntime 管理员", "AgentRuntime 全部管理权限"),
     ("role_agentruntime_operator", "AgentRuntime 操作者", "AgentRuntime 运行、停止、查看权限"),
     ("role_agentruntime_viewer", "AgentRuntime 只读", "AgentRuntime 只读权限"),
     ("role_sqlhub_admin", "SQLHub 管理员", "SQLHub 全部管理权限"),
+    ("role_sqlhub_editor", "SQLHub 编辑者", "SQLHub 查询、数据源、模板等写入权限"),
     ("role_sqlhub_viewer", "SQLHub 只读", "SQLHub 只读权限"),
     ("role_modelgateway_admin", "ModelGateway 管理员", "模型网关全部管理权限"),
+    ("role_modelgateway_operator", "ModelGateway 操作者", "模型网关路由、发布、限流等操作权限"),
     ("role_modelgateway_viewer", "ModelGateway 只读", "模型网关只读权限"),
     ("role_portal_admin", "Portal 管理员", "门户全部管理权限"),
+    ("role_portal_editor", "Portal 编辑者", "门户页面、菜单、公告等写入权限"),
     ("role_portal_viewer", "Portal 只读", "门户只读权限"),
 ]
 
 COMMON_PERMISSIONS = [
     ("perm_platform_admin", "平台管理员策略", ["role_platform_admin"], ["*"], ["*"]),
-    ("perm_platform_viewer", "平台只读策略", ["role_platform_viewer"], ["portal:*", "skillhub:*", "agentruntime:*", "sqlhub:*", "modelgateway:*"], ["read", "view", "list", "admin:read"]),
+    ("perm_platform_viewer", "平台只读策略", ["role_platform_viewer"], ["portal:*", "skillhub:*", "agentruntime:*", "sqlhub:*", "modelgateway:*", "audit:*"], ["read", "view", "list", "admin:read"]),
+    ("perm_audit_admin", "审计管理策略", ["role_audit_admin", "role_security_admin"], ["audit:*", "*:audit:*"], ["*"]),
+    ("perm_audit_viewer", "审计只读策略", ["role_audit_viewer"], ["audit:*", "*:audit:*"], ["read", "view", "list"]),
+    ("perm_security_admin", "安全管理策略", ["role_security_admin"], ["auth:*", "authn:*", "authz:*", "audit:*", "casdoor:*"], ["*"]),
+
     ("perm_skillhub_admin", "SkillHub 管理策略", ["role_skillhub_admin"], ["skillhub:*"], ["*"]),
-    ("perm_skillhub_editor", "SkillHub 编辑策略", ["role_skillhub_editor"], ["skillhub:skill:*", "skillhub:knowledge:*", "skillhub:workflow:*"], ["read", "view", "list", "write", "create", "update", "approve", "admin:read", "admin:write"]),
+    ("perm_skillhub_editor", "SkillHub 编辑策略", ["role_skillhub_editor"], [
+        "skillhub:skill:*",
+        "skillhub:group:*",
+        "skillhub:proposal:*",
+        "skillhub:release:*",
+        "skillhub:knowledge:*",
+        "skillhub:workflow:*",
+        "skillhub:audit:*",
+    ], ["read", "view", "list", "write", "create", "update", "delete", "publish", "rollback", "approve", "reject", "admin:read", "admin:write"]),
     ("perm_skillhub_viewer", "SkillHub 只读策略", ["role_skillhub_viewer"], ["skillhub:*"], ["read", "view", "list", "admin:read"]),
+
     ("perm_agentruntime_admin", "AgentRuntime 管理策略", ["role_agentruntime_admin"], ["agentruntime:*"], ["*"]),
-    ("perm_agentruntime_operator", "AgentRuntime 操作策略", ["role_agentruntime_operator"], ["agentruntime:run:*", "agentruntime:session:*", "agentruntime:agent:*"], ["read", "view", "list", "run", "stop", "admin:read"]),
+    ("perm_agentruntime_operator", "AgentRuntime 操作策略", ["role_agentruntime_operator"], ["agentruntime:run:*", "agentruntime:session:*", "agentruntime:agent:*", "agentruntime:tool:*", "agentruntime:audit:*"], ["read", "view", "list", "run", "stop", "restart", "approve", "reject", "admin:read"]),
     ("perm_agentruntime_viewer", "AgentRuntime 只读策略", ["role_agentruntime_viewer"], ["agentruntime:*"], ["read", "view", "list", "admin:read"]),
+
     ("perm_sqlhub_admin", "SQLHub 管理策略", ["role_sqlhub_admin"], ["sqlhub:*"], ["*"]),
+    ("perm_sqlhub_editor", "SQLHub 编辑策略", ["role_sqlhub_editor"], ["sqlhub:datasource:*", "sqlhub:query:*", "sqlhub:template:*", "sqlhub:report:*", "sqlhub:audit:*"], ["read", "view", "list", "create", "update", "execute", "export", "admin:read", "admin:write"]),
     ("perm_sqlhub_viewer", "SQLHub 只读策略", ["role_sqlhub_viewer"], ["sqlhub:*"], ["read", "view", "list", "admin:read"]),
+
     ("perm_modelgateway_admin", "ModelGateway 管理策略", ["role_modelgateway_admin"], ["modelgateway:*"], ["*"]),
+    ("perm_modelgateway_operator", "ModelGateway 操作策略", ["role_modelgateway_operator"], ["modelgateway:model:*", "modelgateway:route:*", "modelgateway:key:*", "modelgateway:quota:*", "modelgateway:audit:*"], ["read", "view", "list", "create", "update", "publish", "disable", "enable", "admin:read"]),
     ("perm_modelgateway_viewer", "ModelGateway 只读策略", ["role_modelgateway_viewer"], ["modelgateway:*"], ["read", "view", "list", "admin:read"]),
+
     ("perm_portal_admin", "Portal 管理策略", ["role_portal_admin"], ["portal:*"], ["*"]),
+    ("perm_portal_editor", "Portal 编辑策略", ["role_portal_editor"], ["portal:page:*", "portal:menu:*", "portal:notice:*", "portal:asset:*"], ["read", "view", "list", "create", "update", "delete", "publish", "admin:read"]),
     ("perm_portal_viewer", "Portal 只读策略", ["role_portal_viewer"], ["portal:*"], ["read", "view", "list", "admin:read"]),
 ]
 
@@ -122,6 +147,10 @@ def role_id(org: str, role_name: str) -> str:
     return f"{org}/{role_name}"
 
 
+def permission_id(org: str, perm_name: str) -> str:
+    return f"{org}/{perm_name}"
+
+
 def render(args: argparse.Namespace) -> tuple[str, str, list[str]]:
     for name in ["org", "app_owner", "app", "client_id", "model", "permission_id", "admin_user"]:
         validate_identifier(name, getattr(args, name))
@@ -134,7 +163,7 @@ def render(args: argparse.Namespace) -> tuple[str, str, list[str]]:
     lines: list[str] = [
         "-- AI Sphere Auth Casdoor bootstrap SQL",
         "-- Generated by scripts/casdoor/render-casdoor-seed.py",
-        "-- Scope: organization, application, model, roles, permissions and role-user binding.",
+        "-- Scope: organization, application, model, roles, permissions, permission rules and role-user binding.",
         "-- This file is idempotent and does not drop or create tables.",
         "-- Environment-specific values are injected by generator parameters at deployment time.",
         "SET FOREIGN_KEY_CHECKS=0;",
@@ -172,12 +201,25 @@ def render(args: argparse.Namespace) -> tuple[str, str, list[str]]:
         ))
 
     lines.extend(["", "-- 5. Permissions / policies"])
+    generated_perm_ids = [permission_id(args.org, item[0]) for item in COMMON_PERMISSIONS]
     for name, display_name, roles, resources, actions in COMMON_PERMISSIONS:
         lines.append(insert_on_duplicate(
             "permission",
             ["owner", "name", "created_time", "display_name", "description", "users", "groups", "roles", "domains", "model", "adapter", "resource_type", "resources", "actions", "effect", "is_enabled", "submitter", "approver", "approve_time", "state"],
             [sql_quote(args.org), sql_quote(name), sql_quote(created_time), sql_quote(display_name), sql_quote(display_name), sql_quote("[]"), sql_quote("[]"), sql_json([role_id(args.org, r) for r in roles]), sql_quote("[]"), sql_quote(args.model), sql_quote(""), sql_quote("Application"), sql_json(resources), sql_json(actions), sql_quote("Allow"), "1", sql_quote(args.admin_user), sql_quote(args.admin_user), sql_quote(created_time), sql_quote("Approved")],
         ))
+
+    lines.extend(["", "-- 6. Permission rules / Casbin policies"])
+    lines.append("DELETE FROM `permission_rule` WHERE `v5` IN (" + ", ".join(sql_quote(x) for x in generated_perm_ids) + ");")
+    for name, _display_name, roles, resources, actions in COMMON_PERMISSIONS:
+        perm_id = permission_id(args.org, name)
+        for role in roles:
+            for resource in resources:
+                for action in actions:
+                    lines.append(
+                        "INSERT INTO `permission_rule` (`ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES "
+                        f"('p', {sql_quote(role_id(args.org, role))}, {sql_quote(resource)}, {sql_quote(action)}, 'allow', '', {sql_quote(perm_id)});"
+                    )
 
     config_lines = [
         f"AISPHERE_CASDOOR_OWNER={args.org}",
@@ -218,6 +260,7 @@ def main() -> int:
     print(f"[OK] wrote Casdoor seed SQL: {out}")
     print(f"[INFO] org={args.org} app={args.app} client_id={args.client_id}")
     print(f"[INFO] permission_id={args.org}/{args.permission_id}")
+    print(f"[INFO] roles={len(COMMON_ROLES)} permissions={len(COMMON_PERMISSIONS)}")
     if args.env_output.strip():
         print(f"[OK] wrote aisphere-auth env values: {args.env_output}")
     elif not args.client_secret.strip():
