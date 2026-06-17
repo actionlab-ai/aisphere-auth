@@ -5,6 +5,7 @@ import (
 
 	"github.com/actionlab-ai/aisphere-auth/internal/authn"
 	"github.com/actionlab-ai/aisphere-auth/internal/config"
+	"github.com/actionlab-ai/aisphere-auth/internal/httpx"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +22,7 @@ func NewHandler(cfg config.Config, authnSvc authn.Service, authzSvc Service) *Ha
 func (h *Handler) Check(c *gin.Context) {
 	var req CheckRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "message": err.Error()})
+		httpx.RespondError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if req.Subject == "" {
@@ -32,7 +33,15 @@ func (h *Handler) Check(c *gin.Context) {
 	}
 	decision, err := h.authz.Check(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"allow": false, "error": "forbidden", "decision": decision, "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{
+			"allow":    false,
+			"decision": decision,
+			"error": gin.H{
+				"code":    "forbidden",
+				"message": err.Error(),
+				"traceId": httpx.RequestID(c),
+			},
+		})
 		return
 	}
 	c.JSON(http.StatusOK, decision)
@@ -43,7 +52,7 @@ func (h *Handler) BatchCheck(c *gin.Context) {
 		Checks []CheckRequest `json:"checks"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "message": err.Error()})
+		httpx.RespondError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if sid, err := c.Cookie(h.cfg.Session.CookieName); err == nil && sid != "" {
@@ -57,7 +66,14 @@ func (h *Handler) BatchCheck(c *gin.Context) {
 	}
 	decisions, err := h.authz.BatchCheck(c.Request.Context(), body.Checks)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden", "decisions": decisions, "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{
+			"decisions": decisions,
+			"error": gin.H{
+				"code":    "forbidden",
+				"message": err.Error(),
+				"traceId": httpx.RequestID(c),
+			},
+		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"decisions": decisions})
