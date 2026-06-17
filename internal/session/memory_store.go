@@ -9,13 +9,18 @@ import (
 
 var ErrNotFound = errors.New("session not found")
 
+const maxMemorySessions = 10000
+
 type MemoryStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
+	stop     chan struct{}
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{sessions: make(map[string]*Session)}
+	s := &MemoryStore{sessions: make(map[string]*Session), stop: make(chan struct{})}
+	go s.cleanupLoop(time.Minute)
+	return s
 }
 
 func (s *MemoryStore) Create(ctx context.Context, sess *Session, ttl time.Duration) error {
@@ -26,6 +31,15 @@ func (s *MemoryStore) Create(ctx context.Context, sess *Session, ttl time.Durati
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
+	if len(s.sessions) >= maxMemorySessions {
+		s.cleanupExpiredLocked(now)
+	}
+	if len(s.sessions) >= maxMemorySessions {
+		for key := range s.sessions {
+			delete(s.sessions, key)
+			break
+		}
+	}
 	copy := *sess
 	if copy.CreatedAt.IsZero() {
 		copy.CreatedAt = now
@@ -91,4 +105,36 @@ func (s *MemoryStore) DeleteBySubject(ctx context.Context, subjectID string) err
 		}
 	}
 	return nil
+}
+
+// CleanupExpired removes expired sessions. It is public for tests and also used
+// by the background cleanup loop.
+func (s *MemoryStore) CleanupExpired(now time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cleanupExpiredLocked(now)
+}
+
+func (s *MemoryStore) cleanupExpiredLocked(now time.Time) int {
+	removed := 0
+	for id, sess := range s.sessions {
+		if sess == nil || now.After(sess.ExpiresAt) {
+			delete(s.sessions, id)
+			removed++
+		}
+	}
+	return removed
+}
+
+func (s *MemoryStore) cleanupLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.CleanupExpired(time.Now())
+		case <-s.stop:
+			return
+		}
+	}
 }
