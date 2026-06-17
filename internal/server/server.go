@@ -93,6 +93,10 @@ func (s *Server) registerRoutes() {
 	internalAuth := requireServiceToken(s.cfg)
 
 	s.router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	s.router.GET("/livez", func(c *gin.Context) {
+		status, checks := s.liveness(c.Request.Context(), sessionStore)
+		c.JSON(status, gin.H{"status": statusText(status), "checks": checks})
+	})
 	s.router.GET("/readyz", func(c *gin.Context) {
 		status, checks := s.readiness(c.Request.Context(), sessionStore, casdoorClient)
 		c.JSON(status, gin.H{"status": statusText(status), "checks": checks})
@@ -112,6 +116,19 @@ func (s *Server) registerRoutes() {
 		authzGroup.POST("/check", authzHandler.Check)
 		authzGroup.POST("/batch-check", authzHandler.BatchCheck)
 	}
+}
+
+func (s *Server) liveness(ctx context.Context, sessionStore session.Store) (int, gin.H) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+
+	checks := gin.H{"server": "ok", "session": s.cfg.Session.Provider}
+	if err := sessionStore.Ping(ctx); err != nil {
+		checks["session"] = "unavailable"
+		checks["session_error"] = err.Error()
+		return http.StatusServiceUnavailable, checks
+	}
+	return http.StatusOK, checks
 }
 
 func (s *Server) readiness(ctx context.Context, sessionStore session.Store, casdoorClient *casdoor.HTTPClient) (int, gin.H) {
