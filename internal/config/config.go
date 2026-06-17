@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 
@@ -329,11 +330,14 @@ func validate(cfg Config) error {
 	if strings.TrimSpace(cfg.Server.Addr) == "" {
 		return fmt.Errorf("server.addr 不能为空")
 	}
-	if _, err := url.ParseRequestURI(cfg.Server.PublicBaseURL); cfg.Server.PublicBaseURL != "" && err != nil {
-		return fmt.Errorf("server.publicBaseURL 必须是合法 URL: %w", err)
+	if cfg.Server.PublicBaseURL != "" {
+		u, err := url.Parse(cfg.Server.PublicBaseURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("server.publicBaseURL 必须是带 scheme/host 的合法 URL")
+		}
 	}
 	for _, proxy := range cfg.Server.TrustedProxies {
-		if _, _, err := parseProxyCIDR(proxy); err != nil {
+		if err := validateProxyCIDR(proxy); err != nil {
 			return fmt.Errorf("server.trustedProxies 包含非法 CIDR/IP %q: %w", proxy, err)
 		}
 	}
@@ -370,10 +374,8 @@ func validate(cfg Config) error {
 	if cfg.Token.Enabled && strings.TrimSpace(cfg.Token.SigningSecret) == "" {
 		return fmt.Errorf("token.enabled=true 时 token.signingSecret/AISPHERE_JWT_SECRET 不能为空")
 	}
-	if cfg.Internal.ServiceTokenRequired {
-		if len(strings.TrimSpace(cfg.Internal.ServiceToken)) < 32 {
-			return fmt.Errorf("internal.serviceTokenRequired=true 时 internal.serviceToken 长度至少 32 位")
-		}
+	if cfg.Internal.ServiceTokenRequired && len(strings.TrimSpace(cfg.Internal.ServiceToken)) < 32 {
+		return fmt.Errorf("internal.serviceTokenRequired=true 时 internal.serviceToken 长度至少 32 位")
 	}
 	if cfg.Internal.RateLimitQPS <= 0 {
 		return fmt.Errorf("internal.rateLimitQPS 必须大于 0")
@@ -384,14 +386,17 @@ func validate(cfg Config) error {
 	return nil
 }
 
-func parseProxyCIDR(value string) (string, *url.URL, error) {
+func validateProxyCIDR(value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", nil, nil
+		return nil
 	}
 	if strings.Contains(value, "/") {
-		_, _, err := strings.Cut(value, "/")
-		return value, nil, err
+		_, _, err := net.ParseCIDR(value)
+		return err
 	}
-	return value, nil, nil
+	if net.ParseIP(value) == nil {
+		return fmt.Errorf("not an IP or CIDR")
+	}
+	return nil
 }
