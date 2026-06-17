@@ -50,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--admin-password-hash", default="", help="Precomputed bcrypt hash for bootstrap admin password")
     parser.add_argument("--skip-admin-user-create", action="store_true", help="Do not create/update bootstrap admin user row")
     parser.add_argument("--skip-admin-binding", action="store_true", help="Do not bind admin user to role_platform_admin")
+    parser.add_argument("--admin-user-only", action="store_true", help="Only create/update bootstrap admin user and role binding; do not touch application/client secret")
     parser.add_argument("--created-time", default="", help="Fixed Casdoor created_time")
 
     # Import options.
@@ -145,6 +146,8 @@ def render_seed(args: argparse.Namespace) -> None:
         cmd.append("--skip-admin-user-create")
     if args.skip_admin_binding:
         cmd.append("--skip-admin-binding")
+    if args.admin_user_only:
+        cmd.append("--admin-user-only")
     if args.created_time:
         cmd += ["--created-time", args.created_time]
 
@@ -167,6 +170,25 @@ def validate_seed_sql(sql: str) -> None:
     missing = [item for item in required_fragments if item not in sql]
     if missing:
         raise SystemExit("[ERROR] generated Casdoor seed SQL is missing required organization defaults: " + ", ".join(missing))
+
+
+def validate_admin_user_sql(sql: str) -> None:
+    required_fragments = [
+        "INSERT INTO `user`",
+        "`password_type`",
+        "'bcrypt'",
+    ]
+    forbidden_fragments = [
+        "INSERT INTO `application`",
+        "INSERT INTO `organization`",
+        "INSERT INTO `permission`",
+    ]
+    missing = [item for item in required_fragments if item not in sql]
+    forbidden = [item for item in forbidden_fragments if item in sql]
+    if missing:
+        raise SystemExit("[ERROR] generated admin-user SQL is missing required fragments: " + ", ".join(missing))
+    if forbidden:
+        raise SystemExit("[ERROR] generated admin-user SQL unexpectedly touches full seed tables: " + ", ".join(forbidden))
 
 
 def backup_path(args: argparse.Namespace) -> Path:
@@ -361,7 +383,11 @@ def main() -> int:
 
     render_seed(args)
     sql = Path(args.output)
-    validate_seed_sql(sql.read_text(encoding="utf-8"))
+    generated_sql = sql.read_text(encoding="utf-8")
+    if args.admin_user_only:
+        validate_admin_user_sql(generated_sql)
+    else:
+        validate_seed_sql(generated_sql)
     if args.seed_only:
         print(f"[OK] seed-only completed: {sql}")
         if args.env_output:

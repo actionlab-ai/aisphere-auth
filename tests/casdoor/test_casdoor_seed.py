@@ -81,6 +81,101 @@ class CasdoorSeedTest(unittest.TestCase):
         self.assertTrue(all("'aisphere/aisphere-auth-model'" in line for line in permission_lines))
         self.assertFalse(any("'aisphere-auth-model'" in line and "'aisphere/aisphere-auth-model'" not in line for line in permission_lines))
 
+    def test_rendered_seed_allows_org_users_to_login_application(self):
+        args = argparse.Namespace(
+            org="aisphere",
+            org_display_name="AI Sphere",
+            app_owner="admin",
+            app="aisphere-auth",
+            app_display_name="AI Sphere Auth",
+            client_id="aisphere-auth",
+            client_secret="test-secret",
+            redirect_uri=["http://127.0.0.1:18080/auth/callback/casdoor"],
+            cert="cert-built-in",
+            model="aisphere-auth-model",
+            permission_id="perm_platform_admin",
+            admin_user="admin",
+            admin_display_name="Admin",
+            admin_email="admin@example.com",
+            admin_password="",
+            admin_password_hash="",
+            skip_admin_user_create=True,
+            skip_admin_binding=True,
+            created_time="2026-06-17T00:00:00Z",
+        )
+
+        sql, _, _ = render_seed.render(args)
+
+        self.assertIn("keyMatch(r.sub, p.sub)", sql)
+        self.assertIn("'perm_aisphere_auth_login'", sql)
+        self.assertIn("'[\"aisphere/*\"]'", sql)
+        self.assertIn("'[\"aisphere-auth\"]'", sql)
+        self.assertIn("'[\"Read\"]'", sql)
+        self.assertIn("('p', 'aisphere/*', 'aisphere-auth', 'Read', 'allow', '', 'aisphere/perm_aisphere_auth_login')", sql)
+
+    def test_admin_user_only_renders_without_touching_application(self):
+        args = argparse.Namespace(
+            org="aisphere",
+            org_display_name="AI Sphere",
+            app_owner="admin",
+            app="aisphere-auth",
+            app_display_name="AI Sphere Auth",
+            client_id="aisphere-auth",
+            client_secret="",
+            redirect_uri=[],
+            cert="cert-built-in",
+            model="aisphere-auth-model",
+            permission_id="perm_platform_admin",
+            admin_user="admin",
+            admin_display_name="Admin",
+            admin_email="admin@example.com",
+            admin_password="",
+            admin_password_hash="$2a$10$abcdefghijklmnopqrstuuY2v3p4z5x6c7b8n9m0q1w2e3r4t5y6u",
+            skip_admin_user_create=False,
+            skip_admin_binding=False,
+            admin_user_only=True,
+            created_time="2026-06-17T00:00:00Z",
+        )
+
+        sql, _, config_lines = render_seed.render(args)
+
+        self.assertIn("INSERT INTO `user`", sql)
+        self.assertIn("'aisphere'", sql)
+        self.assertIn("'admin'", sql)
+        self.assertIn("INSERT INTO `role`", sql)
+        self.assertIn('["aisphere/admin"]', sql)
+        self.assertNotIn("INSERT INTO `application`", sql)
+        self.assertNotIn("INSERT INTO `organization`", sql)
+        self.assertNotIn("INSERT INTO `permission`", sql)
+        self.assertNotIn("AISPHERE_CASDOOR_CLIENT_SECRET", "\n".join(config_lines))
+
+    def test_admin_user_only_rejects_empty_password(self):
+        args = argparse.Namespace(
+            org="aisphere",
+            org_display_name="AI Sphere",
+            app_owner="admin",
+            app="aisphere-auth",
+            app_display_name="AI Sphere Auth",
+            client_id="aisphere-auth",
+            client_secret="",
+            redirect_uri=[],
+            cert="cert-built-in",
+            model="aisphere-auth-model",
+            permission_id="perm_platform_admin",
+            admin_user="admin",
+            admin_display_name="Admin",
+            admin_email="admin@example.com",
+            admin_password="",
+            admin_password_hash="",
+            skip_admin_user_create=False,
+            skip_admin_binding=False,
+            admin_user_only=True,
+            created_time="2026-06-17T00:00:00Z",
+        )
+
+        with self.assertRaises(SystemExit):
+            render_seed.render(args)
+
     def test_seed_validation_rejects_missing_account_items(self):
         bad_sql = "INSERT INTO `organization` (`owner`, `name`) VALUES ('admin', 'aisphere');"
 
