@@ -1,6 +1,7 @@
 package authn
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/actionlab-ai/aisphere-auth/internal/httpx"
 	"github.com/gin-gonic/gin"
 )
+
+const maxOAuthStateLength = 128
 
 type Handler struct {
 	cfg config.Config
@@ -20,7 +23,8 @@ func NewHandler(cfg config.Config, svc Service) *Handler { return &Handler{cfg: 
 func (h *Handler) Login(c *gin.Context) {
 	resp, err := h.svc.LoginURL(c.Request.Context(), LoginURLRequest{App: c.Query("app"), RedirectAfterLogin: c.Query("redirect"), Request: c.Request})
 	if err != nil {
-		httpx.RespondError(c, http.StatusInternalServerError, "auth_login_failed", err.Error())
+		slog.Error("auth login failed", "trace_id", httpx.RequestID(c), "error", err)
+		httpx.RespondError(c, http.StatusInternalServerError, "auth_login_failed", "登录初始化失败")
 		return
 	}
 	c.Redirect(http.StatusFound, resp.URL)
@@ -33,9 +37,14 @@ func (h *Handler) Callback(c *gin.Context) {
 		httpx.RespondError(c, http.StatusBadRequest, "missing_code_or_state", "缺少 code 或 state")
 		return
 	}
+	if len(state) > maxOAuthStateLength {
+		httpx.RespondError(c, http.StatusBadRequest, "invalid_state", "state 参数非法")
+		return
+	}
 	resp, err := h.svc.HandleCallback(c.Request.Context(), CallbackRequest{Code: code, State: state, Request: c.Request})
 	if err != nil {
-		httpx.RespondError(c, http.StatusUnauthorized, "auth_callback_failed", err.Error())
+		slog.Warn("auth callback failed", "trace_id", httpx.RequestID(c), "error", err)
+		httpx.RespondError(c, http.StatusUnauthorized, "auth_callback_failed", "登录回调校验失败")
 		return
 	}
 	h.setSessionCookie(c, resp.SessionID, resp.ExpiresAtUnix)
@@ -54,7 +63,7 @@ func (h *Handler) Me(c *gin.Context) {
 	}
 	p, err := h.svc.Current(c.Request.Context(), sessionID)
 	if err != nil {
-		httpx.RespondError(c, http.StatusUnauthorized, "unauthorized", err.Error())
+		httpx.RespondError(c, http.StatusUnauthorized, "unauthorized", "未登录或会话已过期")
 		return
 	}
 	c.JSON(http.StatusOK, p)
@@ -63,7 +72,8 @@ func (h *Handler) Me(c *gin.Context) {
 func (h *Handler) Logout(c *gin.Context) {
 	sessionID, _ := c.Cookie(h.cfg.Session.CookieName)
 	if err := h.svc.Logout(c.Request.Context(), LogoutRequest{SessionID: sessionID, Global: c.Query("global") == "true"}); err != nil {
-		httpx.RespondError(c, http.StatusInternalServerError, "auth_logout_failed", err.Error())
+		slog.Warn("auth logout failed", "trace_id", httpx.RequestID(c), "error", err)
+		httpx.RespondError(c, http.StatusInternalServerError, "auth_logout_failed", "退出登录失败")
 		return
 	}
 	h.clearSessionCookie(c)
@@ -81,11 +91,13 @@ func (h *Handler) Introspect(c *gin.Context) {
 	}
 	p, err := h.svc.Current(c.Request.Context(), req.SessionID)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"active": false, "inactive_reason": err.Error(), "traceId": httpx.RequestID(c)})
+		c.JSON(http.StatusOK, gin.H{"active": false, "inactive_reason": "session_inactive", "traceId": httpx.RequestID(c)})
 		return
 	}
 	if req.App != "" {
-		p.App = req.App
+		cp := *p
+		cp.App = req.App
+		p = &cp
 	}
 	c.JSON(http.StatusOK, gin.H{"active": true, "principal": p})
 }
