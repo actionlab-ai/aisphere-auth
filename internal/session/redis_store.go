@@ -32,12 +32,14 @@ func NewRedisStore(cfg config.RedisConfig) (*RedisStore, error) {
 		Password: cfg.Password,
 		DB:       cfg.DB,
 	})
+	store := &RedisStore{client: client, prefix: prefix}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
+	if err := store.Ping(ctx); err != nil {
+		_ = client.Close()
 		return nil, fmt.Errorf("redis ping failed: %w", err)
 	}
-	return &RedisStore{client: client, prefix: prefix}, nil
+	return store, nil
 }
 
 func (s *RedisStore) Create(ctx context.Context, sess *Session, ttl time.Duration) error {
@@ -106,23 +108,17 @@ func (s *RedisStore) Delete(ctx context.Context, sessionID string) error {
 }
 
 func (s *RedisStore) Touch(ctx context.Context, sessionID string, ttl time.Duration) error {
-	sess, err := s.Get(ctx, sessionID)
+	if strings.TrimSpace(sessionID) == "" {
+		return ErrNotFound
+	}
+	exists, err := s.client.Expire(ctx, s.sessionKey(sessionID), ttl).Result()
 	if err != nil {
 		return err
 	}
-	sess.UpdatedAt = time.Now()
-	sess.ExpiresAt = time.Now().Add(ttl)
-	payload, err := json.Marshal(sess)
-	if err != nil {
-		return fmt.Errorf("marshal session: %w", err)
+	if !exists {
+		return ErrNotFound
 	}
-	pipe := s.client.TxPipeline()
-	pipe.Set(ctx, s.sessionKey(sessionID), payload, ttl)
-	if sess.Principal != nil && sess.Principal.SubjectID != "" {
-		pipe.Expire(ctx, s.subjectKey(sess.Principal.SubjectID), ttl)
-	}
-	_, err = pipe.Exec(ctx)
-	return err
+	return nil
 }
 
 func (s *RedisStore) DeleteBySubject(ctx context.Context, subjectID string) error {
@@ -144,6 +140,14 @@ func (s *RedisStore) DeleteBySubject(ctx context.Context, subjectID string) erro
 	pipe.Del(ctx, key)
 	_, err = pipe.Exec(ctx)
 	return err
+}
+
+func (s *RedisStore) Ping(ctx context.Context) error {
+	return s.client.Ping(ctx).Err()
+}
+
+func (s *RedisStore) Close() error {
+	return s.client.Close()
 }
 
 func (s *RedisStore) sessionKey(sessionID string) string {
