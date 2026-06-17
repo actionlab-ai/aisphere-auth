@@ -124,11 +124,11 @@ func newVersionCommand() *cobra.Command {
 
 func loadRuntimeConfig(cmd *cobra.Command, configFile string) (*viper.Viper, string, config.Config, error) {
 	v := config.NewViper(configFile)
-	bindFlags(cmd, v)
 	used, err := config.ReadConfig(v)
 	if err != nil {
 		return nil, "", config.Config{}, err
 	}
+	applyChangedFlags(cmd, v)
 	cfg, err := config.Load(v)
 	if err != nil {
 		return nil, used, config.Config{}, err
@@ -136,7 +136,7 @@ func loadRuntimeConfig(cmd *cobra.Command, configFile string) (*viper.Viper, str
 	return v, used, cfg, nil
 }
 
-func bindFlags(cmd *cobra.Command, v *viper.Viper) {
+func applyChangedFlags(cmd *cobra.Command, v *viper.Viper) {
 	bindings := map[string]string{
 		"addr":                        "server.addr",
 		"mode":                        "server.mode",
@@ -155,8 +155,12 @@ func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 		"internal-rate-limit-burst":   "internal.rateLimitBurst",
 	}
 	for flagName, key := range bindings {
-		if flag := cmd.Flag(flagName); flag != nil {
-			_ = v.BindPFlag(key, flag)
+		flag := cmd.Flags().Lookup(flagName)
+		if flag == nil {
+			flag = cmd.InheritedFlags().Lookup(flagName)
+		}
+		if flag != nil && flag.Changed {
+			v.Set(key, flag.Value.String())
 		}
 	}
 }
