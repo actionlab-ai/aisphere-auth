@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -168,22 +169,56 @@ func (c *HTTPClient) BatchCheck(ctx context.Context, reqs []CheckRequest) ([]Dec
 	return out.Decisions, nil
 }
 
+func (c *HTTPClient) WriteAudit(ctx context.Context, event aisphereauth.AuditEvent) (*aisphereauth.AuditEvent, error) {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return nil, err
+	}
+	var out aisphereauth.AuditEvent
+	if err := c.post(ctx, "audit_write", "/audit/events", payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *HTTPClient) ListAudit(ctx context.Context, req aisphereauth.AuditListRequest) (*aisphereauth.AuditListResponse, error) {
+	path := "/audit/events"
+	if query := auditListQuery(req); query != "" {
+		path += "?" + query
+	}
+	var out aisphereauth.AuditListResponse
+	if err := c.get(ctx, "audit_list", path, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *HTTPClient) post(ctx context.Context, operation string, path string, payload []byte, out any) error {
+	return c.doJSON(ctx, operation, http.MethodPost, path, bytes.NewReader(payload), out)
+}
+
+func (c *HTTPClient) get(ctx context.Context, operation string, path string, out any) error {
+	return c.doJSON(ctx, operation, http.MethodGet, path, nil, out)
+}
+
+func (c *HTTPClient) doJSON(ctx context.Context, operation string, method string, path string, body io.Reader, out any) error {
 	start := time.Now()
 	statusCode := 0
 	var callErr error
 	defer func() {
 		if c.hook != nil {
-			c.hook(ctx, HookEvent{Operation: operation, Method: http.MethodPost, Path: path, StatusCode: statusCode, Duration: time.Since(start), Err: callErr})
+			c.hook(ctx, HookEvent{Operation: operation, Method: method, Path: path, StatusCode: statusCode, Duration: time.Since(start), Err: callErr})
 		}
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		callErr = err
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.serviceToken != "" {
 		req.Header.Set(c.serviceTokenHeader, c.serviceToken)
 	}
@@ -195,20 +230,44 @@ func (c *HTTPClient) post(ctx context.Context, operation string, path string, pa
 	defer resp.Body.Close()
 	statusCode = resp.StatusCode
 
-	body, err := readLimited(resp.Body, c.maxErrorBodyBytes)
+	responseBody, err := readLimited(resp.Body, c.maxErrorBodyBytes)
 	if err != nil {
 		callErr = err
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		callErr = &APIError{StatusCode: resp.StatusCode, Body: body}
+		callErr = &APIError{StatusCode: resp.StatusCode, Body: responseBody}
 		return callErr
 	}
-	if err := json.Unmarshal([]byte(body), out); err != nil {
+	if err := json.Unmarshal([]byte(responseBody), out); err != nil {
 		callErr = fmt.Errorf("decode aisphere-auth response: %w", err)
 		return callErr
 	}
 	return nil
+}
+
+func auditListQuery(req aisphereauth.AuditListRequest) string {
+	values := url.Values{}
+	setQuery(values, "traceId", req.TraceID)
+	setQuery(values, "actorSubject", req.ActorSubject)
+	setQuery(values, "app", req.App)
+	setQuery(values, "resourceType", req.ResourceType)
+	setQuery(values, "resourceId", req.ResourceID)
+	setQuery(values, "action", req.Action)
+	setQuery(values, "result", req.Result)
+	if req.Limit > 0 {
+		values.Set("limit", strconv.Itoa(req.Limit))
+	}
+	if req.Offset > 0 {
+		values.Set("offset", strconv.Itoa(req.Offset))
+	}
+	return values.Encode()
+}
+
+func setQuery(values url.Values, key string, value string) {
+	if strings.TrimSpace(value) != "" {
+		values.Set(key, strings.TrimSpace(value))
+	}
 }
 
 func readLimited(reader io.Reader, limit int64) (string, error) {
