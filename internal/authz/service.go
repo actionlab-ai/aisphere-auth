@@ -7,12 +7,12 @@ import (
 )
 
 type CheckRequest struct {
-	Principal *principal.Principal
-	Subject   string
-	Object    string
-	Action    string
-	App       string
-	TraceID   string
+	Principal *principal.Principal `json:"principal,omitempty"`
+	Subject   string               `json:"subject,omitempty"`
+	Object    string               `json:"object"`
+	Action    string               `json:"action"`
+	App       string               `json:"app,omitempty"`
+	TraceID   string               `json:"traceId,omitempty"`
 }
 
 type Decision struct {
