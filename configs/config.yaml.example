@@ -45,6 +45,11 @@ token:
   signingSecret: "change-me"
   accessTokenTTLSeconds: 3600
 
+internal:
+  serviceTokenRequired: false
+  serviceTokenHeader: "X-Aisphere-Service-Token"
+  serviceToken: "change-me-in-production"
+
 audit:
   enabled: true
   provider: "logger"
