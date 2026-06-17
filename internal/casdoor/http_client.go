@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -154,9 +155,9 @@ func (c *HTTPClient) Enforce(ctx context.Context, req EnforceRequest) (*EnforceR
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	var out struct {
-		Status string `json:"status"`
-		Msg    string `json:"msg"`
-		Data   any    `json:"data"`
+		Status string          `json:"status"`
+		Msg    string          `json:"msg"`
+		Data   json.RawMessage `json:"data"`
 	}
 	if err := c.doJSON(httpReq, &out); err != nil {
 		return nil, err
@@ -164,9 +165,9 @@ func (c *HTTPClient) Enforce(ctx context.Context, req EnforceRequest) (*EnforceR
 	if out.Status != "ok" {
 		return nil, fmt.Errorf("casdoor enforce status=%s msg=%s", out.Status, out.Msg)
 	}
-	allow, ok := out.Data.(bool)
-	if !ok {
-		return nil, fmt.Errorf("casdoor enforce returned non-bool data")
+	allow, err := parseBoolRaw(out.Data)
+	if err != nil {
+		return nil, fmt.Errorf("casdoor enforce returned non-bool data: %w", err)
 	}
 	return &EnforceResponse{Allow: allow}, nil
 }
@@ -188,6 +189,18 @@ func (c *HTTPClient) doJSON(req *http.Request, out any) error {
 		return fmt.Errorf("decode casdoor response: %w body=%s", err, string(body))
 	}
 	return nil
+}
+
+func parseBoolRaw(data json.RawMessage) (bool, error) {
+	var value bool
+	if err := json.Unmarshal(data, &value); err == nil {
+		return value, nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		return strconv.ParseBool(text)
+	}
+	return false, fmt.Errorf("unsupported data=%s", string(data))
 }
 
 func firstNonEmpty(values ...string) string {
