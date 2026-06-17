@@ -1,0 +1,38 @@
+# Default to Linux-friendly line endings for text files.
+* text=auto eol=lf
+
+# Go project sources and common text assets.
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.conf text eol=lf
+*.tmpl text eol=lf
+Dockerfile text eol=lf
+VERSION text eol=lf
+
+# Keep future Windows command scripts Windows-native.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets must not be line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
