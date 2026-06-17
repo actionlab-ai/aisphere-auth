@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="aisphere-auth"
 VERSION="$(tr -d '[:space:]' < "${ROOT_DIR}/VERSION")"
+COMMIT="$(git -C "${ROOT_DIR}" rev-parse --short=12 HEAD 2>/dev/null || echo none)"
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 DIST_DIR="${ROOT_DIR}/dist"
 BUILD_DIR="${ROOT_DIR}/.build"
 
@@ -59,7 +61,7 @@ build_one() {
     arm64) platform="linux/arm64" ;;
   esac
 
-  echo "[INFO] build ${NAME} ${VERSION} arch=${arch} platform=${platform}"
+  echo "[INFO] build ${NAME} ${VERSION} arch=${arch} platform=${platform} commit=${COMMIT}"
   rm -rf "${payload}"
   mkdir -p "${payload}/images" "${payload}/manifests" "${payload}/meta"
 
@@ -98,6 +100,9 @@ PY
     if [[ -n "${dockerfile}" ]]; then
       echo "[INFO] docker buildx build --load ${tag}"
       docker buildx build --load --platform "${img_platform:-${platform}}" \
+        --build-arg VERSION="${VERSION}" \
+        --build-arg COMMIT="${COMMIT}" \
+        --build-arg BUILD_DATE="${BUILD_DATE}" \
         -t "${tag}" \
         -f "${ROOT_DIR}/${dockerfile}" \
         "${ROOT_DIR}/${context}"
