@@ -239,6 +239,10 @@ def permission_id(org: str, perm_name: str) -> str:
     return f"{org}/{perm_name}"
 
 
+def model_id(org: str, model_name: str) -> str:
+    return f"{org}/{model_name}"
+
+
 def build_password_hash(args: argparse.Namespace) -> tuple[str, str, str | None]:
     """Return (password_hash, password_type, generated_password_or_none)."""
     if args.admin_password_hash.strip():
@@ -317,7 +321,7 @@ def render(args: argparse.Namespace) -> tuple[str, str, list[str]]:
         lines.append(insert_on_duplicate(
             "permission",
             ["owner", "name", "created_time", "display_name", "description", "users", "groups", "roles", "domains", "model", "adapter", "resource_type", "resources", "actions", "effect", "is_enabled", "submitter", "approver", "approve_time", "state"],
-            [sql_quote(args.org), sql_quote(name), sql_quote(created_time), sql_quote(display_name), sql_quote(display_name), sql_json([]), sql_json([]), sql_json([role_id(args.org, r) for r in roles]), sql_json([]), sql_quote(args.model), sql_quote(""), sql_quote("Application"), sql_json(resources), sql_json(actions), sql_quote("Allow"), "1", sql_quote(args.admin_user), sql_quote(args.admin_user), sql_quote(created_time), sql_quote("Approved")],
+            [sql_quote(args.org), sql_quote(name), sql_quote(created_time), sql_quote(display_name), sql_quote(display_name), sql_json([]), sql_json([]), sql_json([role_id(args.org, r) for r in roles]), sql_json([]), sql_quote(model_id(args.org, args.model)), sql_quote(""), sql_quote("Application"), sql_json(resources), sql_json(actions), sql_quote("Allow"), "1", sql_quote(args.admin_user), sql_quote(args.admin_user), sql_quote(created_time), sql_quote("Approved")],
         ))
 
     lines.extend(["", "-- 7. Permission rules / Casbin policies"])
