@@ -16,6 +16,7 @@ BACKUP_DIR="backups/casdoor"
 CREATE_DATABASE="false"
 DRY_RUN="false"
 YES="false"
+MYSQL_CNF=""
 
 usage() {
   cat <<'EOF'
@@ -38,8 +39,8 @@ Casdoor SQL 自动导入工具
 参数：
   --host <host>              Casdoor MySQL 地址，默认 127.0.0.1
   --port <port>              Casdoor MySQL 端口，默认 3306
-  --database <db>            Casdoor 数据库名，默认 casdoor
-  --user <user>              MySQL 用户，默认 root
+  --database <db>            Casdoor 数据库名，默认 casdoor，只允许字母数字下划线
+  --user <user>              MySQL 用户，默认 root，只允许字母数字下划线和横线
   --password <password>      MySQL 密码，也可用环境变量 CASDOOR_MYSQL_PASSWORD
   --sql <file>               要导入的 SQL 文件，默认 deployments/casdoor/sql/aisphere-auth-casdoor.sql
   --mysql-bin <path>         mysql 命令路径，默认 mysql
@@ -84,6 +85,40 @@ if [[ -z "$PASSWORD" && -n "${CASDOOR_MYSQL_PASSWORD:-}" ]]; then
   PASSWORD="$CASDOOR_MYSQL_PASSWORD"
 fi
 
+validate_identifier() {
+  local name="$1"
+  local value="$2"
+  local regex="$3"
+  if [[ ! "$value" =~ $regex ]]; then
+    echo "[ERROR] invalid ${name}: ${value}" >&2
+    exit 1
+  fi
+}
+
+validate_identifier "database" "$DATABASE" '^[A-Za-z0-9_]+$'
+validate_identifier "user" "$USER" '^[A-Za-z0-9_-]+$'
+validate_identifier "port" "$PORT" '^[0-9]+$'
+
+cleanup() {
+  if [[ -n "${MYSQL_CNF}" && -f "${MYSQL_CNF}" ]]; then
+    rm -f "${MYSQL_CNF}"
+  fi
+}
+trap cleanup EXIT
+
+create_mysql_cnf() {
+  MYSQL_CNF="$(mktemp)"
+  chmod 600 "${MYSQL_CNF}"
+  cat > "${MYSQL_CNF}" <<EOF
+[client]
+user=${USER}
+password=${PASSWORD}
+host=${HOST}
+port=${PORT}
+protocol=tcp
+EOF
+}
+
 if [[ ! -f "$SQL_FILE" ]]; then
   echo "[ERROR] SQL file not found: $SQL_FILE" >&2
   echo "        Put your exported Casdoor SQL at this path or pass --sql <file>." >&2
@@ -100,22 +135,26 @@ if [[ "$USE_DOCKER" != "true" && ! -x "$(command -v "$MYSQL_BIN" || true)" ]]; t
   fi
 fi
 
+if [[ "$USE_DOCKER" != "true" ]]; then
+  create_mysql_cnf
+fi
+
 run_mysql_file() {
   local target_db="$1"
   local sql_file="$2"
   if [[ "$USE_DOCKER" == "true" ]]; then
-    docker run --rm -i "$DOCKER_IMAGE" mysql --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" ${PASSWORD:+-p"$PASSWORD"} "$target_db" < "$sql_file"
+    docker run --rm -i -e MYSQL_PWD="$PASSWORD" "$DOCKER_IMAGE" mysql --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" "$target_db" < "$sql_file"
   else
-    MYSQL_PWD="$PASSWORD" "$MYSQL_BIN" --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" "$target_db" < "$sql_file"
+    "$MYSQL_BIN" --defaults-extra-file="$MYSQL_CNF" "$target_db" < "$sql_file"
   fi
 }
 
 run_mysql_exec() {
   local sql="$1"
   if [[ "$USE_DOCKER" == "true" ]]; then
-    docker run --rm -i "$DOCKER_IMAGE" mysql --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" ${PASSWORD:+-p"$PASSWORD"} -e "$sql"
+    docker run --rm -i -e MYSQL_PWD="$PASSWORD" "$DOCKER_IMAGE" mysql --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" -e "$sql"
   else
-    MYSQL_PWD="$PASSWORD" "$MYSQL_BIN" --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" -e "$sql"
+    "$MYSQL_BIN" --defaults-extra-file="$MYSQL_CNF" -e "$sql"
   fi
 }
 
@@ -129,9 +168,9 @@ backup_database() {
     return 0
   fi
   if [[ "$USE_DOCKER" == "true" ]]; then
-    docker run --rm -i "$DOCKER_IMAGE" mysqldump --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" ${PASSWORD:+-p"$PASSWORD"} "$DATABASE" > "$backup_file"
+    docker run --rm -i -e MYSQL_PWD="$PASSWORD" "$DOCKER_IMAGE" mysqldump --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" "$DATABASE" > "$backup_file"
   else
-    MYSQL_PWD="$PASSWORD" "$MYSQLDUMP_BIN" --protocol=tcp -h "$HOST" -P "$PORT" -u "$USER" "$DATABASE" > "$backup_file"
+    "$MYSQLDUMP_BIN" --defaults-extra-file="$MYSQL_CNF" "$DATABASE" > "$backup_file"
   fi
 }
 
