@@ -6,18 +6,21 @@ import (
 	"time"
 )
 
+const defaultDecisionCacheMaxEntries = 10000
+
 type cacheEntry struct {
 	decision  Decision
 	expiresAt time.Time
 }
 
 type DecisionCache struct {
-	mu    sync.RWMutex
-	items map[string]cacheEntry
+	mu         sync.RWMutex
+	items      map[string]cacheEntry
+	maxEntries int
 }
 
 func NewDecisionCache() *DecisionCache {
-	return &DecisionCache{items: make(map[string]cacheEntry)}
+	return &DecisionCache{items: make(map[string]cacheEntry), maxEntries: defaultDecisionCacheMaxEntries}
 }
 
 func (c *DecisionCache) Get(subject, object, action string) (Decision, bool) {
@@ -45,7 +48,39 @@ func (c *DecisionCache) Set(subject, object, action string, decision Decision, t
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.items[cacheKey(subject, object, action)] = cacheEntry{decision: decision, expiresAt: time.Now().Add(ttl)}
+	now := time.Now()
+	if c.maxEntries > 0 && len(c.items) >= c.maxEntries {
+		c.cleanupExpiredLocked(now)
+	}
+	if c.maxEntries > 0 && len(c.items) >= c.maxEntries {
+		c.evictOneLocked()
+	}
+	c.items[cacheKey(subject, object, action)] = cacheEntry{decision: decision, expiresAt: now.Add(ttl)}
+}
+
+func (c *DecisionCache) cleanupExpiredLocked(now time.Time) int {
+	removed := 0
+	for key, entry := range c.items {
+		if now.After(entry.expiresAt) {
+			delete(c.items, key)
+			removed++
+		}
+	}
+	return removed
+}
+
+func (c *DecisionCache) evictOneLocked() {
+	var oldestKey string
+	var oldest time.Time
+	for key, entry := range c.items {
+		if oldestKey == "" || entry.expiresAt.Before(oldest) {
+			oldestKey = key
+			oldest = entry.expiresAt
+		}
+	}
+	if oldestKey != "" {
+		delete(c.items, oldestKey)
+	}
 }
 
 func cacheKey(subject, object, action string) string {
