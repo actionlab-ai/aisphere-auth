@@ -63,6 +63,7 @@ func newRootCommand() *cobra.Command {
 	cmd.PersistentFlags().String("addr", "", "服务监听地址，例如 :18080；覆盖配置项 server.addr")
 	cmd.PersistentFlags().String("mode", "", "Gin 运行模式：debug、release、test；覆盖配置项 server.mode")
 	cmd.PersistentFlags().String("public-base-url", "", "外部访问基础地址，例如 https://auth.example.com；覆盖 server.publicBaseURL")
+	cmd.PersistentFlags().String("trusted-proxies", "", "可信代理 IP/CIDR，多个用英文逗号分隔；覆盖 server.trustedProxies")
 	cmd.PersistentFlags().String("session-provider", "", "Session 存储类型：memory 或 redis；覆盖 session.provider")
 	cmd.PersistentFlags().String("redis-addrs", "", "Redis 地址，多个用英文逗号分隔，例如 127.0.0.1:6379；覆盖 session.redis.addrs")
 	cmd.PersistentFlags().String("casdoor-endpoint", "", "Casdoor 服务地址，例如 http://127.0.0.1:8000；覆盖 casdoor.endpoint")
@@ -71,6 +72,9 @@ func newRootCommand() *cobra.Command {
 	cmd.PersistentFlags().String("casdoor-redirect-url", "", "Casdoor OAuth 回调地址；覆盖 casdoor.redirectURL")
 	cmd.PersistentFlags().String("service-token", "", "内部服务调用凭证；覆盖 internal.serviceToken")
 	cmd.PersistentFlags().Bool("service-token-required", false, "是否强制校验内部服务调用凭证；覆盖 internal.serviceTokenRequired")
+	cmd.PersistentFlags().Bool("internal-rate-limit-enabled", true, "是否启用内部 API 限流；覆盖 internal.rateLimitEnabled")
+	cmd.PersistentFlags().Int("internal-rate-limit-qps", 0, "内部 API 每 IP/token 每秒速率；覆盖 internal.rateLimitQPS")
+	cmd.PersistentFlags().Int("internal-rate-limit-burst", 0, "内部 API 每 IP/token 突发桶大小；覆盖 internal.rateLimitBurst")
 	cmd.PersistentFlags().BoolVar(&printConfig, "print-config", false, "打印脱敏后的最终配置并退出")
 
 	cmd.AddCommand(newCheckConfigCommand(&configFile))
@@ -134,17 +138,21 @@ func loadRuntimeConfig(cmd *cobra.Command, configFile string) (*viper.Viper, str
 
 func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 	bindings := map[string]string{
-		"addr":                   "server.addr",
-		"mode":                   "server.mode",
-		"public-base-url":        "server.publicBaseURL",
-		"session-provider":       "session.provider",
-		"redis-addrs":            "session.redis.addrs",
-		"casdoor-endpoint":       "casdoor.endpoint",
-		"casdoor-client-id":      "casdoor.clientId",
-		"casdoor-client-secret":  "casdoor.clientSecret",
-		"casdoor-redirect-url":   "casdoor.redirectURL",
-		"service-token":          "internal.serviceToken",
-		"service-token-required": "internal.serviceTokenRequired",
+		"addr":                        "server.addr",
+		"mode":                        "server.mode",
+		"public-base-url":             "server.publicBaseURL",
+		"trusted-proxies":             "server.trustedProxies",
+		"session-provider":            "session.provider",
+		"redis-addrs":                 "session.redis.addrs",
+		"casdoor-endpoint":            "casdoor.endpoint",
+		"casdoor-client-id":           "casdoor.clientId",
+		"casdoor-client-secret":       "casdoor.clientSecret",
+		"casdoor-redirect-url":        "casdoor.redirectURL",
+		"service-token":               "internal.serviceToken",
+		"service-token-required":      "internal.serviceTokenRequired",
+		"internal-rate-limit-enabled": "internal.rateLimitEnabled",
+		"internal-rate-limit-qps":     "internal.rateLimitQPS",
+		"internal-rate-limit-burst":   "internal.rateLimitBurst",
 	}
 	for flagName, key := range bindings {
 		if flag := cmd.Flag(flagName); flag != nil {
@@ -158,6 +166,7 @@ func printSafeConfig(cfg config.Config, configFile string) error {
 		ConfigFile string        `json:"configFile"`
 		Config     config.Config `json:"config"`
 	}
+	cfg.Casdoor.ClientID = maskSecret(cfg.Casdoor.ClientID)
 	cfg.Casdoor.ClientSecret = maskSecret(cfg.Casdoor.ClientSecret)
 	cfg.Session.Redis.Password = maskSecret(cfg.Session.Redis.Password)
 	cfg.Token.SigningSecret = maskSecret(cfg.Token.SigningSecret)
