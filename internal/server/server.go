@@ -40,10 +40,20 @@ func (s *Server) registerRoutes() {
 	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient)
 	authnHandler := authn.NewHandler(s.cfg, authnSvc)
 	authzHandler := authz.NewHandler(s.cfg, authnSvc, authzSvc)
+	internalAuth := requireServiceToken(s.cfg)
 
 	s.router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	s.router.GET("/readyz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "checks": gin.H{"config": "ok", "session": s.cfg.Session.Provider, "state": s.cfg.Session.Provider, "casdoor": "configured"}})
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+			"checks": gin.H{
+				"config":        "ok",
+				"session":       s.cfg.Session.Provider,
+				"state":         s.cfg.Session.Provider,
+				"casdoor":       "configured",
+				"internal_auth": s.internalAuthStatus(),
+			},
+		})
 	})
 
 	auth := s.router.Group("/auth")
@@ -52,14 +62,21 @@ func (s *Server) registerRoutes() {
 		auth.GET("/callback/casdoor", authnHandler.Callback)
 		auth.GET("/me", authnHandler.Me)
 		auth.POST("/logout", authnHandler.Logout)
-		auth.POST("/sessions/introspect", authnHandler.Introspect)
+		auth.POST("/sessions/introspect", internalAuth, authnHandler.Introspect)
 	}
 
-	authzGroup := s.router.Group("/authz")
+	authzGroup := s.router.Group("/authz", internalAuth)
 	{
 		authzGroup.POST("/check", authzHandler.Check)
 		authzGroup.POST("/batch-check", authzHandler.BatchCheck)
 	}
+}
+
+func (s *Server) internalAuthStatus() string {
+	if s.cfg.Internal.ServiceTokenRequired || strings.TrimSpace(s.cfg.Internal.ServiceToken) != "" {
+		return "service-token"
+	}
+	return "disabled"
 }
 
 func mustBuildSessionStore(cfg config.Config) session.Store {
