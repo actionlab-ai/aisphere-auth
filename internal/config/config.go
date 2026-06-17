@@ -211,7 +211,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("authz.cacheTTLSeconds", 30)
 	v.SetDefault("authz.failClosed", true)
 
-	v.SetDefault("token.enabled", true)
+	// 本地 Token/JWT 能力当前仍是预留能力，默认关闭，避免空密钥误用。
+	v.SetDefault("token.enabled", false)
 	v.SetDefault("token.issuer", "aisphere-auth")
 	v.SetDefault("token.audience", []string{"aisphere"})
 	v.SetDefault("token.alg", "HS256")
@@ -280,12 +281,28 @@ func getStringSlice(v *viper.Viper, key string) []string {
 
 func normalize(cfg *Config) {
 	cfg.Server.Mode = strings.TrimSpace(cfg.Server.Mode)
+	cfg.Gateway.CookieSameSite = normalizeCookieSameSite(cfg.Gateway.CookieSameSite)
 	cfg.Session.Provider = strings.ToLower(strings.TrimSpace(cfg.Session.Provider))
 	cfg.Authz.Provider = strings.ToLower(strings.TrimSpace(cfg.Authz.Provider))
 	cfg.Token.Algorithm = strings.ToUpper(strings.TrimSpace(cfg.Token.Algorithm))
 	cfg.Internal.ServiceTokenHeader = strings.TrimSpace(cfg.Internal.ServiceTokenHeader)
 	if cfg.Internal.ServiceTokenHeader == "" {
 		cfg.Internal.ServiceTokenHeader = "X-Aisphere-Service-Token"
+	}
+}
+
+func normalizeCookieSameSite(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "strict":
+		return "Strict"
+	case "none":
+		return "None"
+	case "default":
+		return "Default"
+	case "", "lax":
+		return "Lax"
+	default:
+		return "Lax"
 	}
 }
 
@@ -301,6 +318,12 @@ func validate(cfg Config) error {
 	}
 	if cfg.Authz.CacheTTLSeconds > 60 {
 		return fmt.Errorf("authz.cacheTTLSeconds 不建议超过 60 秒，当前值: %d", cfg.Authz.CacheTTLSeconds)
+	}
+	if strings.EqualFold(cfg.Gateway.CookieSameSite, "None") && !cfg.Gateway.CookieSecure {
+		return fmt.Errorf("gateway.cookieSameSite=None 时必须同时设置 gateway.cookieSecure=true")
+	}
+	if cfg.Token.Enabled && strings.TrimSpace(cfg.Token.SigningSecret) == "" {
+		return fmt.Errorf("token.enabled=true 时 token.signingSecret/AISPHERE_JWT_SECRET 不能为空")
 	}
 	return nil
 }
