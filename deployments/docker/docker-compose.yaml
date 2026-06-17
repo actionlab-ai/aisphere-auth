@@ -7,12 +7,18 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   aisphere-auth:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
     container_name: aisphere-auth
+    restart: unless-stopped
     environment:
       AISPHERE_AUTH_ADDR: ":18080"
       AISPHERE_AUTH_MODE: "debug"
@@ -28,12 +34,21 @@ services:
       AISPHERE_CASDOOR_REDIRECT_URL: "http://127.0.0.1:18080/auth/callback/casdoor"
       AISPHERE_CASDOOR_PERMISSION_ID: "skillhub/platform_permission"
       AISPHERE_SERVICE_TOKEN_REQUIRED: "true"
-      AISPHERE_SERVICE_TOKEN: "dev-service-token-change-me"
+      AISPHERE_SERVICE_TOKEN: "dev-service-token-change-me-please-rotate"
       AISPHERE_SERVICE_TOKEN_HEADER: "X-Aisphere-Service-Token"
+      AISPHERE_INTERNAL_RATE_LIMIT_ENABLED: "true"
+      AISPHERE_INTERNAL_RATE_LIMIT_QPS: "100"
+      AISPHERE_INTERNAL_RATE_LIMIT_BURST: "200"
     ports:
       - "18080:18080"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/aisphere-auth", "check-config"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   redis-data:
