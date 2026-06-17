@@ -88,22 +88,7 @@ PY
 
   printf 'name\tarch\tplatform\tsource_tag\ttarget_tag\ttar\n' > "${payload}/images/image-index.tsv"
 
-  python3 - "${payload}/meta/selected-images.json" | while IFS=$'\t' read -r name img_arch img_platform pull dockerfile context tag tar_name; do
-import json, sys
-with open(sys.argv[1], 'r', encoding='utf-8') as f:
-    data = json.load(f)
-for item in data:
-    print('\t'.join([
-        item.get('name',''),
-        item.get('arch',''),
-        item.get('platform',''),
-        item.get('pull',''),
-        item.get('dockerfile',''),
-        item.get('context','.'),
-        item.get('tag',''),
-        item.get('tar',''),
-    ]))
-PY
+  while IFS=$'\t' read -r name img_arch img_platform pull dockerfile context tag tar_name; do
     if [[ -z "${tag}" || -z "${tar_name}" ]]; then
       echo "invalid image entry: tag/tar required" >&2
       exit 1
@@ -130,7 +115,23 @@ PY
     echo "[INFO] docker save ${tag} -> images/${tar_name}"
     docker save "${tag}" -o "${payload}/images/${tar_name}"
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${name}" "${img_arch}" "${img_platform:-${platform}}" "${source_tag}" "${tag}" "${tar_name}" >> "${payload}/images/image-index.tsv"
-  done
+  done < <(python3 - "${payload}/meta/selected-images.json" <<'PY'
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    data = json.load(f)
+for item in data:
+    print('\t'.join([
+        item.get('name',''),
+        item.get('arch',''),
+        item.get('platform',''),
+        item.get('pull',''),
+        item.get('dockerfile',''),
+        item.get('context','.'),
+        item.get('tag',''),
+        item.get('tar',''),
+    ]))
+PY
+)
 
   (
     cd "${payload}"
