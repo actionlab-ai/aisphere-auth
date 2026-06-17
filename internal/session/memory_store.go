@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-var ErrNotFound = errors.New("session not found")
+var (
+	ErrNotFound  = errors.New("session not found")
+	ErrStoreFull = errors.New("session store full")
+)
 
 const maxMemorySessions = 10000
 
@@ -15,6 +18,7 @@ type MemoryStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	stop     chan struct{}
+	once     sync.Once
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -24,7 +28,9 @@ func NewMemoryStore() *MemoryStore {
 }
 
 func (s *MemoryStore) Create(ctx context.Context, sess *Session, ttl time.Duration) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if sess == nil || sess.ID == "" {
 		return errors.New("session id is required")
 	}
@@ -35,10 +41,7 @@ func (s *MemoryStore) Create(ctx context.Context, sess *Session, ttl time.Durati
 		s.cleanupExpiredLocked(now)
 	}
 	if len(s.sessions) >= maxMemorySessions {
-		for key := range s.sessions {
-			delete(s.sessions, key)
-			break
-		}
+		return ErrStoreFull
 	}
 	copy := *sess
 	if copy.CreatedAt.IsZero() {
@@ -51,7 +54,9 @@ func (s *MemoryStore) Create(ctx context.Context, sess *Session, ttl time.Durati
 }
 
 func (s *MemoryStore) Get(ctx context.Context, sessionID string) (*Session, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	sess, ok := s.sessions[sessionID]
 	if !ok || time.Now().After(sess.ExpiresAt) {
@@ -71,7 +76,9 @@ func (s *MemoryStore) Update(ctx context.Context, sess *Session, ttl time.Durati
 }
 
 func (s *MemoryStore) Delete(ctx context.Context, sessionID string) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
@@ -79,7 +86,9 @@ func (s *MemoryStore) Delete(ctx context.Context, sessionID string) error {
 }
 
 func (s *MemoryStore) Touch(ctx context.Context, sessionID string, ttl time.Duration) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[sessionID]
@@ -93,7 +102,9 @@ func (s *MemoryStore) Touch(ctx context.Context, sessionID string, ttl time.Dura
 }
 
 func (s *MemoryStore) DeleteBySubject(ctx context.Context, subjectID string) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if subjectID == "" {
 		return nil
 	}
@@ -104,6 +115,15 @@ func (s *MemoryStore) DeleteBySubject(ctx context.Context, subjectID string) err
 			delete(s.sessions, id)
 		}
 	}
+	return nil
+}
+
+func (s *MemoryStore) Ping(ctx context.Context) error {
+	return ctx.Err()
+}
+
+func (s *MemoryStore) Close() error {
+	s.once.Do(func() { close(s.stop) })
 	return nil
 }
 
