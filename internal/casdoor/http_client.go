@@ -173,17 +173,32 @@ func (c *HTTPClient) Enforce(ctx context.Context, req EnforceRequest) (*EnforceR
 }
 
 func (c *HTTPClient) Ping(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.cfg.Endpoint, "/")+"/", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.cfg.Endpoint, "/")+"/api/health", nil)
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Accept", "application/json")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 500 {
-		return fmt.Errorf("casdoor health http=%d", resp.StatusCode)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("casdoor health http=%d body=%s", resp.StatusCode, string(body))
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return nil
+	}
+	var out struct {
+		Status string `json:"status"`
+		Msg    string `json:"msg"`
+	}
+	if err := json.Unmarshal(body, &out); err == nil && out.Status != "" && !strings.EqualFold(out.Status, "ok") {
+		return fmt.Errorf("casdoor health status=%s msg=%s", out.Status, out.Msg)
 	}
 	return nil
 }
