@@ -35,7 +35,7 @@ func (s *Server) Run() error { return s.router.Run(s.cfg.Server.Addr) }
 func (s *Server) registerRoutes() {
 	casdoorClient := casdoor.NewHTTPClient(s.cfg.Casdoor)
 	sessionStore := mustBuildSessionStore(s.cfg)
-	stateStore := authn.NewMemoryStateStore()
+	stateStore := mustBuildStateStore(s.cfg)
 	authnSvc := authn.NewDefaultService(authn.ServiceOptions{Config: s.cfg, Casdoor: casdoorClient, SessionStore: sessionStore, StateStore: stateStore})
 	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient)
 	authnHandler := authn.NewHandler(s.cfg, authnSvc)
@@ -43,7 +43,7 @@ func (s *Server) registerRoutes() {
 
 	s.router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	s.router.GET("/readyz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "checks": gin.H{"config": "ok", "session": s.cfg.Session.Provider, "casdoor": "configured"}})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "checks": gin.H{"config": "ok", "session": s.cfg.Session.Provider, "state": s.cfg.Session.Provider, "casdoor": "configured"}})
 	})
 
 	auth := s.router.Group("/auth")
@@ -74,5 +74,20 @@ func mustBuildSessionStore(cfg config.Config) session.Store {
 		return store
 	default:
 		panic(fmt.Errorf("unsupported session provider: %s", cfg.Session.Provider))
+	}
+}
+
+func mustBuildStateStore(cfg config.Config) authn.StateStore {
+	switch strings.ToLower(strings.TrimSpace(cfg.Session.Provider)) {
+	case "", "memory":
+		return authn.NewMemoryStateStore()
+	case "redis":
+		store, err := authn.NewRedisStateStore(cfg.Session.Redis)
+		if err != nil {
+			panic(fmt.Errorf("initialize redis state store: %w", err))
+		}
+		return store
+	default:
+		panic(fmt.Errorf("unsupported state provider: %s", cfg.Session.Provider))
 	}
 }
