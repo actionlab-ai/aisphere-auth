@@ -2,36 +2,108 @@
 
 这个目录用于存放可导入到 Casdoor MySQL 数据库的 SQL 初始化文件。
 
-## 推荐文件名
+## 当前推荐方式：项目专用 Seed SQL
 
-```text
-deployments/casdoor/sql/aisphere-auth-casdoor.sql
+`aisphere-auth` 现在推荐用项目专用 seed 生成器，而不是从某个历史 Casdoor dump 里按关键字抽数据。
+
+生成命令：
+
+```bash
+python3 scripts/casdoor/render-casdoor-seed.py \
+  --output deployments/casdoor/sql/aisphere-auth-casdoor.sql \
+  --org aisphere \
+  --app aisphere-auth \
+  --client-id aisphere-auth \
+  --client-secret '<替换为真实 OAuth Client Secret>' \
+  --redirect-uri http://127.0.0.1:18080/auth/callback/casdoor \
+  --admin-user admin
 ```
 
-这个文件默认不会在仓库中提供真实生产内容，因为 Casdoor 的数据库表结构会随版本变化，而且 SQL 中通常包含 client secret、证书、应用配置、用户密码 hash 等敏感数据。
+导入命令：
 
-## 推荐做法
-
-1. 先在一个参考 Casdoor 环境中完成一次正确配置。
-2. 从该参考环境导出完整 `casdoor.sql`。
-3. 使用 `scripts/casdoor/prepare-casdoor-sql.py` 或 `import-casdoor-sql.sh --prepare-dump` 生成 data-only SQL。
-4. 脱敏检查后保存为 `aisphere-auth-casdoor.sql`。
-5. 在新环境中用 `scripts/casdoor/import-casdoor-sql.sh` 或 PowerShell 脚本一键导入。
-
-## 处理完整 mysqldump
-
-完整 Casdoor dump 一般包含：
-
-```text
-CREATE DATABASE / USE
-SET @@GLOBAL.GTID_PURGED
-SET @@SESSION.SQL_LOG_BIN
-DROP TABLE / CREATE TABLE
-LOCK TABLES / UNLOCK TABLES
-token / session / record 等运行态数据
+```bash
+bash scripts/casdoor/import-casdoor-sql.sh \
+  --host 127.0.0.1 \
+  --port 3306 \
+  --database casdoor \
+  --user root \
+  --password '<Casdoor MySQL 密码>' \
+  --sql deployments/casdoor/sql/aisphere-auth-casdoor.sql \
+  --backup-before \
+  -y
 ```
 
-已有 Casdoor 环境推荐生成 data-only SQL：
+生成的 SQL 是幂等的，使用 `INSERT ... ON DUPLICATE KEY UPDATE`，不会 `DROP TABLE`，也不会导入 token/session/record 等运行态数据。
+
+## Seed 会初始化什么
+
+默认会创建或更新：
+
+```text
+Organization:
+  aisphere
+
+Application:
+  aisphere-auth
+
+Model:
+  aisphere-auth-model
+
+Roles:
+  role_platform_admin
+  role_platform_viewer
+  role_skillhub_admin
+  role_skillhub_editor
+  role_skillhub_viewer
+  role_agentruntime_admin
+  role_agentruntime_operator
+  role_agentruntime_viewer
+  role_sqlhub_admin
+  role_sqlhub_viewer
+  role_modelgateway_admin
+  role_modelgateway_viewer
+  role_portal_admin
+  role_portal_viewer
+
+Permissions:
+  perm_platform_admin
+  perm_platform_viewer
+  perm_skillhub_admin
+  perm_skillhub_editor
+  perm_skillhub_viewer
+  perm_agentruntime_admin
+  perm_agentruntime_operator
+  perm_agentruntime_viewer
+  perm_sqlhub_admin
+  perm_sqlhub_viewer
+  perm_modelgateway_admin
+  perm_modelgateway_viewer
+  perm_portal_admin
+  perm_portal_viewer
+```
+
+默认会把 `aisphere/admin` 绑定到 `role_platform_admin`。这个用户需要已经存在，或者后续在 Casdoor 里创建。
+
+## aisphere-auth 对应配置
+
+导入 seed 后，`aisphere-auth` 建议配置为：
+
+```yaml
+casdoor:
+  endpoint: "http://127.0.0.1:8008"
+  owner: "aisphere"
+  application: "aisphere-auth"
+  clientId: "aisphere-auth"
+  clientSecret: "<与 seed 生成时一致>"
+  redirectURL: "http://127.0.0.1:18080/auth/callback/casdoor"
+  permissionId: "aisphere/perm_platform_admin"
+```
+
+## 历史 dump 预处理能力
+
+`scripts/casdoor/prepare-casdoor-sql.py` 仍然保留，但它只适合迁移一个已验证环境中的配置，不适合作为当前项目的默认初始化方式。
+
+处理完整 mysqldump：
 
 ```bash
 python3 scripts/casdoor/prepare-casdoor-sql.py \
@@ -49,7 +121,7 @@ bash scripts/casdoor/import-casdoor-sql.sh \
   --port 3306 \
   --database casdoor \
   --user root \
-  --password 'your-password' \
+  --password '<Casdoor MySQL 密码>' \
   --sql ./casdoor.sql \
   --prepare-dump \
   --prepare-mode data-only \
@@ -57,57 +129,4 @@ bash scripts/casdoor/import-casdoor-sql.sh \
   -y
 ```
 
-如果确实是全新数据库，需要导入完整 schema/data：
-
-```bash
-bash scripts/casdoor/import-casdoor-sql.sh \
-  --host 127.0.0.1 \
-  --port 3306 \
-  --database casdoor \
-  --user root \
-  --password 'your-password' \
-  --sql ./casdoor.sql \
-  --prepare-dump \
-  --prepare-mode full \
-  --create-database \
-  --allow-destructive \
-  -y
-```
-
-`full` 模式会移除容易失败或环境绑定的语句：
-
-```text
-GTID_PURGED
-SQL_LOG_BIN
-CREATE DATABASE
-USE
-LOCK TABLES
-UNLOCK TABLES
-```
-
-但仍然会保留 `DROP TABLE` / `CREATE TABLE`，所以必须显式加 `--allow-destructive`。
-
-## data-only 默认行为
-
-`data-only` 会：
-
-```text
-提取包含 aisphere / skillhub 关键字的配置行
-默认处理 organization / application / model / permission / role / group / adapter / enforcer 等配置表
-默认跳过 token / session / record / ticket 等运行态表
-输出 REPLACE INTO 语句
-```
-
-如果确实要连用户一起迁移，可以加：
-
-```bash
---prepare-include-users
-```
-
-这会复制用户密码 hash，请导入前人工检查输出 SQL。
-
-## 为什么不直接在脚本里拼 Casdoor INSERT？
-
-Casdoor 的表结构不是稳定公共 API。不同版本、不同数据库方言、不同初始化方式下，`application`、`permission`、`model`、`role` 等表的字段可能不同。为了避免导入脚本在版本升级后破坏生产数据库，本项目采用“导入已验证 SQL 文件”或“从完整 dump 生成 data-only SQL”的方式。
-
-后续可以继续扩展一个 Casdoor API bootstrap 工具，用 Casdoor API 创建 Application、Model、Permission 和 Policy，避免直接依赖数据库表结构。
+这个能力会按关键字抽取历史 dump 中的配置行，可能受原环境命名、历史数据和表结构影响。新环境开箱即用优先使用 `render-casdoor-seed.py`。
