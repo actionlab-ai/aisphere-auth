@@ -2,6 +2,7 @@ package authgin
 
 import (
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -126,7 +127,7 @@ func handleUnauthorized(c *gin.Context, opts MiddlewareOptions, err error) {
 			if containsQuery(loginURL) {
 				separator = "&"
 			}
-			loginURL = loginURL + separator + "redirect=" + urlQueryEscape(redirectURL)
+			loginURL = loginURL + separator + "redirect=" + url.QueryEscape(redirectURL)
 		}
 		c.Redirect(http.StatusFound, loginURL)
 		c.Abort()
@@ -231,12 +232,4 @@ func containsQuery(value string) bool {
 		}
 	}
 	return false
-}
-
-func urlQueryEscape(value string) string {
-	// Keep this dependency-free for middleware users.
-	replacer := sync.OnceValue(func() *strings.Replacer {
-		return strings.NewReplacer("%", "%25", " ", "%20", "?", "%3F", "&", "%26", "=", "%3D", "#", "%23")
-	})
-	return replacer().Replace(value)
 }
