@@ -19,15 +19,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type closeable interface {
+	Close() error
+}
+
 type Server struct {
-	cfg    config.Config
-	router *gin.Engine
+	cfg     config.Config
+	router  *gin.Engine
+	closers []closeable
 }
 
 func New(cfg config.Config) *Server {
 	gin.SetMode(cfg.Server.Mode)
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		panic(fmt.Errorf("configure trusted proxies: %w", err))
+	}
 	r.Use(gin.Recovery())
 	r.Use(requestID())
 
@@ -39,6 +47,7 @@ func New(cfg config.Config) *Server {
 func (s *Server) Run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	defer s.closeDependencies()
 
 	httpServer := &http.Server{
 		Addr:              s.cfg.Server.Addr,
@@ -72,6 +81,11 @@ func (s *Server) registerRoutes() {
 	casdoorClient := casdoor.NewHTTPClient(s.cfg.Casdoor)
 	sessionStore := mustBuildSessionStore(s.cfg)
 	stateStore := mustBuildStateStore(s.cfg)
+	s.closers = append(s.closers, sessionStore)
+	if c, ok := stateStore.(closeable); ok {
+		s.closers = append(s.closers, c)
+	}
+
 	authnSvc := authn.NewDefaultService(authn.ServiceOptions{Config: s.cfg, Casdoor: casdoorClient, SessionStore: sessionStore, StateStore: stateStore})
 	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient)
 	authnHandler := authn.NewHandler(s.cfg, authnSvc)
@@ -80,16 +94,8 @@ func (s *Server) registerRoutes() {
 
 	s.router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	s.router.GET("/readyz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-			"checks": gin.H{
-				"config":        "ok",
-				"session":       s.cfg.Session.Provider,
-				"state":         s.cfg.Session.Provider,
-				"casdoor":       "configured",
-				"internal_auth": s.internalAuthStatus(),
-			},
-		})
+		status, checks := s.readiness(c.Request.Context(), sessionStore, casdoorClient)
+		c.JSON(status, gin.H{"status": statusText(status), "checks": checks})
 	})
 
 	auth := s.router.Group("/auth")
@@ -105,6 +111,51 @@ func (s *Server) registerRoutes() {
 	{
 		authzGroup.POST("/check", authzHandler.Check)
 		authzGroup.POST("/batch-check", authzHandler.BatchCheck)
+	}
+}
+
+func (s *Server) readiness(ctx context.Context, sessionStore session.Store, casdoorClient *casdoor.HTTPClient) (int, gin.H) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	checks := gin.H{
+		"config":        "ok",
+		"session":       s.cfg.Session.Provider,
+		"state":         s.cfg.Session.Provider,
+		"casdoor":       "unknown",
+		"internal_auth": s.internalAuthStatus(),
+	}
+	ok := true
+	if err := sessionStore.Ping(ctx); err != nil {
+		checks["session"] = "unavailable"
+		checks["session_error"] = err.Error()
+		ok = false
+	}
+	if err := casdoorClient.Ping(ctx); err != nil {
+		checks["casdoor"] = "unavailable"
+		checks["casdoor_error"] = err.Error()
+		ok = false
+	} else {
+		checks["casdoor"] = "ok"
+	}
+	if !ok {
+		return http.StatusServiceUnavailable, checks
+	}
+	return http.StatusOK, checks
+}
+
+func statusText(status int) string {
+	if status >= 200 && status < 300 {
+		return "ok"
+	}
+	return "unavailable"
+}
+
+func (s *Server) closeDependencies() {
+	for _, c := range s.closers {
+		if err := c.Close(); err != nil {
+			slog.Warn("close dependency failed", "error", err)
+		}
 	}
 }
 
