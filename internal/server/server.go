@@ -3,7 +3,11 @@ package server
 import (
 	"net/http"
 
+	"github.com/actionlab-ai/aisphere-auth/internal/authn"
+	"github.com/actionlab-ai/aisphere-auth/internal/authz"
+	"github.com/actionlab-ai/aisphere-auth/internal/casdoor"
 	"github.com/actionlab-ai/aisphere-auth/internal/config"
+	"github.com/actionlab-ai/aisphere-auth/internal/session"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,47 +28,34 @@ func New(cfg config.Config) *Server {
 	return s
 }
 
-func (s *Server) Run() error {
-	return s.router.Run(s.cfg.Server.Addr)
-}
+func (s *Server) Run() error { return s.router.Run(s.cfg.Server.Addr) }
 
 func (s *Server) registerRoutes() {
-	s.router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	casdoorClient := casdoor.NewHTTPClient(s.cfg.Casdoor)
+	sessionStore := session.NewMemoryStore()
+	stateStore := authn.NewMemoryStateStore()
+	authnSvc := authn.NewDefaultService(authn.ServiceOptions{Config: s.cfg, Casdoor: casdoorClient, SessionStore: sessionStore, StateStore: stateStore})
+	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient)
+	authnHandler := authn.NewHandler(s.cfg, authnSvc)
+	authzHandler := authz.NewHandler(s.cfg, authnSvc, authzSvc)
 
+	s.router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	s.router.GET("/readyz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-			"checks": gin.H{
-				"config":  "ok",
-				"redis":   "not_configured",
-				"casdoor": "not_checked",
-			},
-		})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "checks": gin.H{"config": "ok", "session": s.cfg.Session.Provider, "casdoor": "configured"}})
 	})
 
 	auth := s.router.Group("/auth")
 	{
-		auth.GET("/login", notImplemented("auth.login"))
-		auth.GET("/callback/casdoor", notImplemented("auth.callback.casdoor"))
-		auth.GET("/me", notImplemented("auth.me"))
-		auth.POST("/logout", notImplemented("auth.logout"))
-		auth.POST("/sessions/introspect", notImplemented("auth.sessions.introspect"))
+		auth.GET("/login", authnHandler.Login)
+		auth.GET("/callback/casdoor", authnHandler.Callback)
+		auth.GET("/me", authnHandler.Me)
+		auth.POST("/logout", authnHandler.Logout)
+		auth.POST("/sessions/introspect", authnHandler.Introspect)
 	}
 
-	authz := s.router.Group("/authz")
+	authzGroup := s.router.Group("/authz")
 	{
-		authz.POST("/check", notImplemented("authz.check"))
-		authz.POST("/batch-check", notImplemented("authz.batch_check"))
-	}
-}
-
-func notImplemented(name string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, gin.H{
-			"error":   "not_implemented",
-			"handler": name,
-		})
+		authzGroup.POST("/check", authzHandler.Check)
+		authzGroup.POST("/batch-check", authzHandler.BatchCheck)
 	}
 }
