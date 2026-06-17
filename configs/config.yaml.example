@@ -239,8 +239,9 @@ internal:
   # 内部服务调用凭证。
   # SkillHub、AgentRuntime 等服务调用 /authz/check、/auth/sessions/introspect 时必须携带。
   # 生产环境必须通过 Secret 注入，不要提交真实值。
+  # 开发环境可先留空；需要模拟内部鉴权时再填写长随机字符串。
   # 对应环境变量：AISPHERE_SERVICE_TOKEN
-  serviceToken: "change-me-in-production"
+  serviceToken: ""
 
 audit:
   # 是否启用审计。
