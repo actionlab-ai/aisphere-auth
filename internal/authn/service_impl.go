@@ -90,7 +90,16 @@ func (s *DefaultService) HandleCallback(ctx context.Context, req CallbackRequest
 	p.AuthProvider = "casdoor"
 	expiresAt := time.Now().Add(time.Duration(s.cfg.Session.TTLSeconds) * time.Second)
 	p.ExpiresAtUnix = expiresAt.Unix()
-	sess := &session.Session{ID: sessionID, Principal: p, CasdoorTokenSet: tokens, CreatedAt: time.Now(), UpdatedAt: time.Now(), ExpiresAt: expiresAt, UserAgent: userAgent(req.Request), ClientIP: clientIP(req.Request)}
+	sess := &session.Session{
+		ID:              sessionID,
+		Principal:       p,
+		CasdoorTokenSet: tokens,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		ExpiresAt:       expiresAt,
+		UserAgent:       userAgent(req.Request),
+		ClientIP:        clientIP(req.Request),
+	}
 	if err := s.sessions.Create(ctx, sess, time.Until(expiresAt)); err != nil {
 		return nil, err
 	}
@@ -140,5 +149,16 @@ func normalizeRedirect(value string, fallback string) string {
 	return value
 }
 
-func userAgent(r *http.Request) string { if r == nil { return "" }; return r.UserAgent() }
-func clientIP(r *http.Request) string { if r == nil { return "" }; return r.RemoteAddr }
+func userAgent(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return r.UserAgent()
+}
+
+func clientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return r.RemoteAddr
+}
