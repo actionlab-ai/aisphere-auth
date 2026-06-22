@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/actionlab-ai/aisphere-auth/internal/config"
 	"github.com/actionlab-ai/aisphere-auth/internal/server"
+	platformlog "github.com/actionlab-ai/aisphere-go/logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -51,6 +53,9 @@ func newRootCommand() *cobra.Command {
 			}
 			if printConfig {
 				return printSafeConfig(cfg, used)
+			}
+			if err := configureLogger(); err != nil {
+				return err
 			}
 			logConfigSource(used, v)
 			return server.New(cfg).Run()
@@ -191,6 +196,18 @@ func maskSecret(value string) string {
 		return "******"
 	}
 	return value[:3] + "******" + value[len(value)-3:]
+}
+
+func configureLogger() error {
+	logger, err := platformlog.New(platformlog.Config{
+		Level:  os.Getenv("AISPHERE_AUTH_LOG_LEVEL"),
+		Format: os.Getenv("AISPHERE_AUTH_LOG_FORMAT"),
+	})
+	if err != nil {
+		return fmt.Errorf("configure logger: %w", err)
+	}
+	slog.SetDefault(logger)
+	return nil
 }
 
 func logConfigSource(configFile string, v *viper.Viper) {

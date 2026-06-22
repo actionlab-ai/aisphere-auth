@@ -9,22 +9,33 @@ import (
 // CheckRequest mirrors the server-side authorization check payload.
 // Keep JSON field names stable because this type is consumed by external services.
 type CheckRequest struct {
-	Subject string `json:"subject,omitempty"`
-	Object  string `json:"object"`
-	Action  string `json:"action"`
-	App     string `json:"app,omitempty"`
-	TraceID string `json:"traceId,omitempty"`
+	Principal    *aisphereauth.Principal `json:"principal,omitempty"`
+	Subject      string                  `json:"subject,omitempty"`
+	Object       string                  `json:"object"`
+	Action       string                  `json:"action"`
+	App          string                  `json:"app,omitempty"`
+	TraceID      string                  `json:"traceId,omitempty"`
+	OrgID        string                  `json:"orgId,omitempty"`
+	ProjectID    string                  `json:"projectId,omitempty"`
+	ResourceType string                  `json:"resourceType,omitempty"`
+	ResourceID   string                  `json:"resourceId,omitempty"`
 }
 
 // Decision mirrors the server-side authorization decision response.
 type Decision struct {
-	Allow   bool   `json:"allow"`
-	Source  string `json:"source"`
-	Reason  string `json:"reason,omitempty"`
-	Subject string `json:"subject"`
-	Object  string `json:"object"`
-	Action  string `json:"action"`
-	TraceID string `json:"traceId,omitempty"`
+	Allow          bool   `json:"allow"`
+	Source         string `json:"source"`
+	Reason         string `json:"reason,omitempty"`
+	Subject        string `json:"subject"`
+	Object         string `json:"object"`
+	Action         string `json:"action"`
+	TraceID        string `json:"traceId,omitempty"`
+	App            string `json:"app,omitempty"`
+	OrgID          string `json:"orgId,omitempty"`
+	ProjectID      string `json:"projectId,omitempty"`
+	ResourceType   string `json:"resourceType,omitempty"`
+	ResourceID     string `json:"resourceId,omitempty"`
+	MatchedGrantID string `json:"matchedGrantId,omitempty"`
 }
 
 // Client is the public SDK contract used by business services.

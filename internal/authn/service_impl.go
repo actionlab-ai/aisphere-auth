@@ -158,10 +158,34 @@ func normalizeRedirect(value string, fallback string) string {
 		return fallback
 	}
 	u, err := url.Parse(value)
-	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/") {
+	if err != nil {
+		return fallback
+	}
+	if u.IsAbs() || u.Host != "" {
+		if isLocalDevelopmentRedirect(u) {
+			return value
+		}
+		return fallback
+	}
+	if !strings.HasPrefix(u.Path, "/") {
 		return fallback
 	}
 	return value
+}
+
+func isLocalDevelopmentRedirect(u *url.URL) bool {
+	if u == nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLoopback()
 }
 
 func containsControl(value string) bool {

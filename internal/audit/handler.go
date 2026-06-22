@@ -44,6 +44,8 @@ func (h *Handler) List(c *gin.Context) {
 		TraceID:      c.Query("traceId"),
 		ActorSubject: c.Query("actorSubject"),
 		App:          c.Query("app"),
+		OrgID:        c.Query("orgId"),
+		ProjectID:    c.Query("projectId"),
 		ResourceType: c.Query("resourceType"),
 		ResourceID:   c.Query("resourceId"),
 		Action:       c.Query("action"),

@@ -110,6 +110,8 @@ func normalizeEvent(event aisphereauth.AuditEvent) aisphereauth.AuditEvent {
 	event.ActorSubject = strings.TrimSpace(event.ActorSubject)
 	event.ActorName = strings.TrimSpace(event.ActorName)
 	event.App = strings.TrimSpace(event.App)
+	event.OrgID = strings.TrimSpace(event.OrgID)
+	event.ProjectID = strings.TrimSpace(event.ProjectID)
 	event.ResourceType = strings.TrimSpace(event.ResourceType)
 	event.ResourceID = strings.TrimSpace(event.ResourceID)
 	event.Action = strings.TrimSpace(event.Action)
@@ -126,6 +128,8 @@ func matches(event aisphereauth.AuditEvent, req aisphereauth.AuditListRequest) b
 	return match(req.TraceID, event.TraceID) &&
 		match(req.ActorSubject, event.ActorSubject) &&
 		match(req.App, event.App) &&
+		match(req.OrgID, event.OrgID) &&
+		match(req.ProjectID, event.ProjectID) &&
 		match(req.ResourceType, event.ResourceType) &&
 		match(req.ResourceID, event.ResourceID) &&
 		match(req.Action, event.Action) &&

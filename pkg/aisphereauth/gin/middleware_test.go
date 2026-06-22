@@ -45,7 +45,7 @@ func TestRequireLoginCachesIntrospection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	authClient := &fakeClient{}
 	r := gin.New()
-	r.Use(RequireLogin(authClient, MiddlewareOptions{App: "skillhub", CacheTTL: time.Minute}))
+	r.Use(RequireLogin(authClient, MiddlewareOptions{App: "aihub", CacheTTL: time.Minute}))
 	r.GET("/ok", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	for i := 0; i < 2; i++ {

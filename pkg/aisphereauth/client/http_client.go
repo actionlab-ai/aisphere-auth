@@ -152,9 +152,6 @@ func (c *HTTPClient) Check(ctx context.Context, req CheckRequest) (*Decision, er
 	if err := c.post(ctx, "check", "/authz/check", payload, &out); err != nil {
 		return nil, err
 	}
-	if !out.Allow {
-		return &out, aisphereauth.ErrPermissionDenied
-	}
 	return &out, nil
 }
 
@@ -188,6 +185,46 @@ func (c *HTTPClient) ListAudit(ctx context.Context, req aisphereauth.AuditListRe
 	}
 	var out aisphereauth.AuditListResponse
 	if err := c.get(ctx, "audit_list", path, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *HTTPClient) CreateResourceGrant(ctx context.Context, grant aisphereauth.ResourceGrant) (*aisphereauth.ResourceGrant, error) {
+	payload, err := json.Marshal(grant)
+	if err != nil {
+		return nil, err
+	}
+	var out aisphereauth.ResourceGrant
+	if err := c.post(ctx, "iam_resource_grant_create", "/iam/resource-grants", payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *HTTPClient) ListResourceGrants(ctx context.Context, req aisphereauth.ResourceGrantQuery) (*aisphereauth.ResourceGrantListResponse, error) {
+	path := "/iam/resource-grants"
+	if query := resourceGrantQuery(req); query != "" {
+		path += "?" + query
+	}
+	var out aisphereauth.ResourceGrantListResponse
+	if err := c.get(ctx, "iam_resource_grant_list", path, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *HTTPClient) DeleteResourceGrant(ctx context.Context, id string) error {
+	return c.doJSON(ctx, "iam_resource_grant_delete", http.MethodDelete, "/iam/resource-grants/"+url.PathEscape(strings.TrimSpace(id)), nil, &map[string]any{})
+}
+
+func (c *HTTPClient) CheckResourceGrant(ctx context.Context, req aisphereauth.ResourceGrantCheckRequest) (*aisphereauth.ResourceGrantCheckDecision, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	var out aisphereauth.ResourceGrantCheckDecision
+	if err := c.post(ctx, "iam_resource_grant_check", "/iam/resource-grants/check", payload, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -246,11 +283,32 @@ func (c *HTTPClient) doJSON(ctx context.Context, operation string, method string
 	return nil
 }
 
+func resourceGrantQuery(req aisphereauth.ResourceGrantQuery) string {
+	values := url.Values{}
+	setQuery(values, "app", req.App)
+	setQuery(values, "orgId", req.OrgID)
+	setQuery(values, "projectId", req.ProjectID)
+	setQuery(values, "resourceType", req.ResourceType)
+	setQuery(values, "resourceId", req.ResourceID)
+	setQuery(values, "object", req.Object)
+	setQuery(values, "subjectType", req.SubjectType)
+	setQuery(values, "subjectId", req.SubjectID)
+	if req.Limit > 0 {
+		values.Set("limit", strconv.Itoa(req.Limit))
+	}
+	if req.Offset > 0 {
+		values.Set("offset", strconv.Itoa(req.Offset))
+	}
+	return values.Encode()
+}
+
 func auditListQuery(req aisphereauth.AuditListRequest) string {
 	values := url.Values{}
 	setQuery(values, "traceId", req.TraceID)
 	setQuery(values, "actorSubject", req.ActorSubject)
 	setQuery(values, "app", req.App)
+	setQuery(values, "orgId", req.OrgID)
+	setQuery(values, "projectId", req.ProjectID)
 	setQuery(values, "resourceType", req.ResourceType)
 	setQuery(values, "resourceId", req.ResourceID)
 	setQuery(values, "action", req.Action)

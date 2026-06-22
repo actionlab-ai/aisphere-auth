@@ -7,8 +7,8 @@
 你需要知道：
 
 ```text
-Casdoor 访问地址，例如：http://36.138.61.152:8008
-Casdoor MySQL 地址，例如：36.138.61.152:30306
+Casdoor 访问地址，例如：http://CHANGE_ME_HOST:8008
+Casdoor MySQL 地址，例如：CHANGE_ME_HOST:30306
 Casdoor MySQL 数据库名，例如：casdoor
 Casdoor MySQL 用户和密码
 Casdoor 中给 aisphere-auth 使用的 Application clientId / clientSecret
@@ -38,7 +38,7 @@ token / session / record 等运行态数据
 
 ```bash
 bash scripts/casdoor/import-casdoor-sql.sh \
-  --host 36.138.61.152 \
+  --host CHANGE_ME_HOST \
   --port 30306 \
   --database casdoor \
   --user root \
@@ -81,7 +81,7 @@ bash scripts/casdoor/import-casdoor-sql.sh \
 
 ```bash
 bash scripts/casdoor/import-casdoor-sql.sh \
-  --host 36.138.61.152 \
+  --host CHANGE_ME_HOST \
   --port 30306 \
   --database casdoor \
   --user root \
@@ -111,7 +111,7 @@ Windows PowerShell data-only 示例：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\casdoor\import-casdoor-sql.ps1 `
-  -HostName 36.138.61.152 `
+  -HostName CHANGE_ME_HOST `
   -Port 30306 `
   -Database casdoor `
   -User root `
@@ -135,7 +135,7 @@ Linux / macOS：
 
 ```bash
 bash scripts/casdoor/import-casdoor-sql.sh \
-  --host 36.138.61.152 \
+  --host CHANGE_ME_HOST \
   --port 30306 \
   --database casdoor \
   --user root \
@@ -149,7 +149,7 @@ bash scripts/casdoor/import-casdoor-sql.sh \
 
 ```bash
 bash scripts/casdoor/import-casdoor-sql.sh \
-  --host 36.138.61.152 \
+  --host CHANGE_ME_HOST \
   --port 30306 \
   --database casdoor \
   --user root \
@@ -177,7 +177,7 @@ server:
   publicBaseURL: "http://127.0.0.1:18080"
 
 casdoor:
-  endpoint: "http://36.138.61.152:8008"
+  endpoint: "http://CHANGE_ME_HOST:8008"
   owner: "skillhub"
   application: "aisphere"
   clientId: "你的 Casdoor Application Client ID"

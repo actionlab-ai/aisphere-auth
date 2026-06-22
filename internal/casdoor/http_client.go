@@ -10,14 +10,18 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/actionlab-ai/aisphere-auth/internal/config"
 )
 
 type HTTPClient struct {
-	cfg        config.CasdoorConfig
-	httpClient *http.Client
+	cfg          config.CasdoorConfig
+	httpClient   *http.Client
+	tokenMu      sync.Mutex
+	serviceToken string
+	tokenExpiry  time.Time
 }
 
 func NewHTTPClient(cfg config.CasdoorConfig) *HTTPClient {
@@ -153,6 +157,11 @@ func (c *HTTPClient) Enforce(ctx context.Context, req EnforceRequest) (*EnforceR
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if token, err := c.clientCredentialsToken(ctx); err != nil {
+		return nil, err
+	} else if token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	var out struct {
 		Status string          `json:"status"`
@@ -170,6 +179,60 @@ func (c *HTTPClient) Enforce(ctx context.Context, req EnforceRequest) (*EnforceR
 		return nil, fmt.Errorf("casdoor enforce returned non-bool data: %w", err)
 	}
 	return &EnforceResponse{Allow: allow}, nil
+}
+
+func (c *HTTPClient) clientCredentialsToken(ctx context.Context) (string, error) {
+	if strings.TrimSpace(c.cfg.ClientID) == "" || strings.TrimSpace(c.cfg.ClientSecret) == "" {
+		return "", nil
+	}
+	c.tokenMu.Lock()
+	if c.serviceToken != "" && time.Now().Before(c.tokenExpiry) {
+		token := c.serviceToken
+		c.tokenMu.Unlock()
+		return token, nil
+	}
+	c.tokenMu.Unlock()
+
+	form := url.Values{}
+	form.Set("grant_type", "client_credentials")
+	form.Set("client_id", c.cfg.ClientID)
+	form.Set("client_secret", c.cfg.ClientSecret)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.cfg.Endpoint, "/")+"/api/login/oauth/access_token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	var out struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		ExpiresIn   int64  `json:"expires_in"`
+		Error       string `json:"error"`
+		Description string `json:"error_description"`
+	}
+	if err := c.doJSON(req, &out); err != nil {
+		return "", err
+	}
+	if out.Error != "" {
+		return "", fmt.Errorf("casdoor client credentials error: %s %s", out.Error, out.Description)
+	}
+	if out.AccessToken == "" {
+		return "", fmt.Errorf("casdoor client credentials response has no access_token")
+	}
+	ttl := time.Duration(out.ExpiresIn) * time.Second
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	expiry := time.Now().Add(ttl - time.Minute)
+	if ttl <= time.Minute {
+		expiry = time.Now().Add(ttl)
+	}
+	c.tokenMu.Lock()
+	c.serviceToken = out.AccessToken
+	c.tokenExpiry = expiry
+	c.tokenMu.Unlock()
+	return out.AccessToken, nil
 }
 
 func (c *HTTPClient) Ping(ctx context.Context) error {
@@ -248,6 +311,10 @@ func parseBoolRaw(data json.RawMessage) (bool, error) {
 	var text string
 	if err := json.Unmarshal(data, &text); err == nil {
 		return strconv.ParseBool(text)
+	}
+	var values []bool
+	if err := json.Unmarshal(data, &values); err == nil && len(values) > 0 {
+		return values[0], nil
 	}
 	return false, fmt.Errorf("unsupported data=%s", string(data))
 }

@@ -51,6 +51,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-admin-user-create", action="store_true", help="Do not create/update bootstrap admin user row")
     parser.add_argument("--skip-admin-binding", action="store_true", help="Do not bind admin user to role_platform_admin")
     parser.add_argument("--admin-user-only", action="store_true", help="Only create/update bootstrap admin user and role binding; do not touch application/client secret")
+    parser.add_argument("--clean-legacy", dest="clean_legacy", action="store_true", default=True, help="Delete/rename legacy SkillHub policies before writing AIHub policies. Default: enabled")
+    parser.add_argument("--no-clean-legacy", dest="clean_legacy", action="store_false", help="Keep legacy SkillHub policies")
     parser.add_argument("--created-time", default="", help="Fixed Casdoor created_time")
 
     # Import options.
@@ -148,6 +150,10 @@ def render_seed(args: argparse.Namespace) -> None:
         cmd.append("--skip-admin-binding")
     if args.admin_user_only:
         cmd.append("--admin-user-only")
+    if args.clean_legacy:
+        cmd.append("--clean-legacy")
+    else:
+        cmd.append("--no-clean-legacy")
     if args.created_time:
         cmd += ["--created-time", args.created_time]
 
@@ -166,6 +172,15 @@ def validate_seed_sql(sql: str) -> None:
         '"name":"Organization"',
         '"name":"Email"',
         '"name":"Groups"',
+        "p = sub, obj, act, eft, unused, permissionId",
+        'm = (g(r.sub, p.sub) || r.sub == p.sub || keyMatch(r.sub, p.sub)) && (p.obj == "*" || keyMatch(r.obj, p.obj)) && (p.act == "*" || r.act == p.act)',
+        "perm_aihub_admin",
+        "role_aihub_admin",
+        "aihub:skill:*",
+        "aihub:skillset:*",
+        "aihub:agent:*",
+        "aihub:workflow:*",
+        "aihub:runtime:*",
     ]
     missing = [item for item in required_fragments if item not in sql]
     if missing:
@@ -359,7 +374,11 @@ def import_with_pymysql(args: argparse.Namespace, sql: Path) -> None:
 def confirm(args: argparse.Namespace) -> None:
     if args.yes:
         return
-    print("[WARN] This will import idempotent Casdoor seed data into MySQL.")
+    print("[WARN] This will import AIHub Casdoor seed data into MySQL.")
+    if args.clean_legacy:
+        print("       clean: legacy SkillHub roles/permissions/rules will be removed or renamed to AIHub")
+    else:
+        print("       clean: disabled; legacy SkillHub policies will be kept")
     print(f"       target: {args.user}@{args.host}:{args.port}/{args.database}")
     if args.use_pymysql:
         print("       method: PyMySQL")

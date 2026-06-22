@@ -17,6 +17,8 @@ type Config struct {
 	Casdoor  CasdoorConfig
 	Session  SessionConfig
 	Authz    AuthzConfig
+	IAM      IAMConfig
+	Database DatabaseConfig
 	Token    TokenConfig
 	Internal InternalConfig
 }
@@ -67,6 +69,22 @@ type AuthzConfig struct {
 	CacheEnabled    bool
 	CacheTTLSeconds int
 	FailClosed      bool
+}
+
+// IAMConfig controls the built-in platform IAM module. It is intentionally
+// separate from Casdoor: Casdoor remains the IdP, while this module owns
+// AI Sphere specific org/project/group/resource-grant data.
+type IAMConfig struct {
+	Provider string
+}
+
+// DatabaseConfig is currently used by the IAM module.
+type DatabaseConfig struct {
+	Driver       string
+	DSN          string
+	AutoMigrate  bool
+	MaxOpenConns int
+	MaxIdleConns int
 }
 
 type TokenConfig struct {
@@ -165,6 +183,16 @@ func Load(v *viper.Viper) (Config, error) {
 			CacheTTLSeconds: v.GetInt("authz.cacheTTLSeconds"),
 			FailClosed:      v.GetBool("authz.failClosed"),
 		},
+		IAM: IAMConfig{
+			Provider: v.GetString("iam.provider"),
+		},
+		Database: DatabaseConfig{
+			Driver:       v.GetString("database.driver"),
+			DSN:          v.GetString("database.dsn"),
+			AutoMigrate:  v.GetBool("database.autoMigrate"),
+			MaxOpenConns: v.GetInt("database.maxOpenConns"),
+			MaxIdleConns: v.GetInt("database.maxIdleConns"),
+		},
 		Token: TokenConfig{
 			Enabled:               v.GetBool("token.enabled"),
 			Issuer:                v.GetString("token.issuer"),
@@ -198,13 +226,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("gateway.cookieSameSite", "Lax")
 
 	v.SetDefault("casdoor.endpoint", "http://127.0.0.1:8000")
-	v.SetDefault("casdoor.owner", "skillhub")
+	v.SetDefault("casdoor.owner", "aisphere")
 	v.SetDefault("casdoor.application", "aisphere")
 	v.SetDefault("casdoor.clientId", "")
 	v.SetDefault("casdoor.clientSecret", "")
 	v.SetDefault("casdoor.redirectURL", "http://127.0.0.1:18080/auth/callback/casdoor")
 	v.SetDefault("casdoor.scopes", []string{"openid", "profile", "email"})
-	v.SetDefault("casdoor.permissionId", "skillhub/platform_permission")
+	v.SetDefault("casdoor.permissionId", "aisphere/perm_aihub_admin")
 	v.SetDefault("casdoor.subjectFormat", "owner-name")
 
 	v.SetDefault("session.provider", "memory")
@@ -221,6 +249,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("authz.cacheEnabled", true)
 	v.SetDefault("authz.cacheTTLSeconds", 30)
 	v.SetDefault("authz.failClosed", true)
+
+	v.SetDefault("iam.provider", "postgres")
+	v.SetDefault("database.driver", "postgres")
+	v.SetDefault("database.dsn", "")
+	v.SetDefault("database.autoMigrate", true)
+	v.SetDefault("database.maxOpenConns", 30)
+	v.SetDefault("database.maxIdleConns", 10)
 
 	// 本地 Token/JWT 能力当前仍是预留能力，默认关闭，避免空密钥误用。
 	v.SetDefault("token.enabled", false)
@@ -268,6 +303,12 @@ func bindLegacyEnvs(v *viper.Viper) {
 	_ = v.BindEnv("authz.cacheEnabled", "AISPHERE_AUTHZ_CACHE_ENABLED")
 	_ = v.BindEnv("authz.cacheTTLSeconds", "AISPHERE_AUTHZ_CACHE_TTL_SECONDS")
 	_ = v.BindEnv("authz.failClosed", "AISPHERE_AUTHZ_FAIL_CLOSED")
+	_ = v.BindEnv("iam.provider", "AISPHERE_AUTH_IAM_PROVIDER")
+	_ = v.BindEnv("database.driver", "AISPHERE_AUTH_DATABASE_DRIVER")
+	_ = v.BindEnv("database.dsn", "AISPHERE_AUTH_DATABASE_DSN")
+	_ = v.BindEnv("database.autoMigrate", "AISPHERE_AUTH_DATABASE_AUTO_MIGRATE")
+	_ = v.BindEnv("database.maxOpenConns", "AISPHERE_AUTH_DATABASE_MAX_OPEN_CONNS")
+	_ = v.BindEnv("database.maxIdleConns", "AISPHERE_AUTH_DATABASE_MAX_IDLE_CONNS")
 	_ = v.BindEnv("token.enabled", "AISPHERE_TOKEN_ENABLED")
 	_ = v.BindEnv("token.issuer", "AISPHERE_TOKEN_ISSUER")
 	_ = v.BindEnv("token.audience", "AISPHERE_TOKEN_AUDIENCE")
@@ -304,6 +345,8 @@ func normalize(cfg *Config) {
 	cfg.Session.Provider = strings.ToLower(strings.TrimSpace(cfg.Session.Provider))
 	cfg.Session.CookieName = strings.TrimSpace(cfg.Session.CookieName)
 	cfg.Authz.Provider = strings.ToLower(strings.TrimSpace(cfg.Authz.Provider))
+	cfg.IAM.Provider = strings.ToLower(strings.TrimSpace(cfg.IAM.Provider))
+	cfg.Database.Driver = strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
 	cfg.Token.Algorithm = strings.ToUpper(strings.TrimSpace(cfg.Token.Algorithm))
 	cfg.Internal.ServiceTokenHeader = strings.TrimSpace(cfg.Internal.ServiceTokenHeader)
 	if cfg.Internal.ServiceTokenHeader == "" {
@@ -367,6 +410,12 @@ func validate(cfg Config) error {
 	}
 	if cfg.Authz.CacheTTLSeconds > 60 {
 		return fmt.Errorf("authz.cacheTTLSeconds 不建议超过 60 秒，当前值: %d", cfg.Authz.CacheTTLSeconds)
+	}
+	if (cfg.IAM.Provider == "postgres" || cfg.IAM.Provider == "pg") && strings.TrimSpace(cfg.Database.DSN) == "" {
+		return fmt.Errorf("iam.provider=postgres 时 database.dsn/AISPHERE_AUTH_DATABASE_DSN 不能为空")
+	}
+	if cfg.IAM.Provider != "" && cfg.IAM.Provider != "memory" && cfg.IAM.Provider != "postgres" && cfg.IAM.Provider != "pg" {
+		return fmt.Errorf("unsupported iam.provider: %s", cfg.IAM.Provider)
 	}
 	if strings.EqualFold(cfg.Gateway.CookieSameSite, "None") && !cfg.Gateway.CookieSecure {
 		return fmt.Errorf("gateway.cookieSameSite=None 时必须同时设置 gateway.cookieSecure=true")

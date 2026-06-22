@@ -16,6 +16,8 @@ import (
 	"github.com/actionlab-ai/aisphere-auth/internal/authz"
 	"github.com/actionlab-ai/aisphere-auth/internal/casdoor"
 	"github.com/actionlab-ai/aisphere-auth/internal/config"
+	"github.com/actionlab-ai/aisphere-auth/internal/iam"
+	"github.com/actionlab-ai/aisphere-auth/internal/iamhttp"
 	"github.com/actionlab-ai/aisphere-auth/internal/session"
 	"github.com/gin-gonic/gin"
 )
@@ -83,16 +85,21 @@ func (s *Server) registerRoutes() {
 	sessionStore := mustBuildSessionStore(s.cfg)
 	stateStore := mustBuildStateStore(s.cfg)
 	auditSvc := audit.NewMemoryService(audit.MemoryOptions{})
+	iamSvc := mustBuildIAMService(s.cfg)
 	s.closers = append(s.closers, sessionStore, auditSvc)
+	if c, ok := iamSvc.(closeable); ok {
+		s.closers = append(s.closers, c)
+	}
 	if c, ok := stateStore.(closeable); ok {
 		s.closers = append(s.closers, c)
 	}
 
 	authnSvc := authn.NewDefaultService(authn.ServiceOptions{Config: s.cfg, Casdoor: casdoorClient, SessionStore: sessionStore, StateStore: stateStore})
-	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient)
+	authzSvc := authz.NewDefaultService(s.cfg, casdoorClient, iamSvc)
 	authnHandler := authn.NewHandler(s.cfg, authnSvc)
 	authzHandler := authz.NewHandler(s.cfg, authnSvc, authzSvc)
 	auditHandler := audit.NewHandler(auditSvc)
+	iamHandler := iamhttp.NewHandler(iamSvc)
 	internalAuth := requireServiceToken(s.cfg)
 
 	s.router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
@@ -118,6 +125,14 @@ func (s *Server) registerRoutes() {
 	{
 		authzGroup.POST("/check", authzHandler.Check)
 		authzGroup.POST("/batch-check", authzHandler.BatchCheck)
+	}
+
+	iamGroup := s.router.Group("/iam", internalAuth)
+	{
+		iamGroup.GET("/resource-grants", iamHandler.ListResourceGrants)
+		iamGroup.POST("/resource-grants", iamHandler.CreateResourceGrant)
+		iamGroup.DELETE("/resource-grants/:id", iamHandler.DeleteResourceGrant)
+		iamGroup.POST("/resource-grants/check", iamHandler.CheckResourceGrant)
 	}
 
 	auditGroup := s.router.Group("/audit", internalAuth)
@@ -190,6 +205,23 @@ func (s *Server) internalAuthStatus() string {
 		return "service-token"
 	}
 	return "disabled"
+}
+
+func mustBuildIAMService(cfg config.Config) iam.Service {
+	switch strings.ToLower(strings.TrimSpace(cfg.IAM.Provider)) {
+	case "", "memory":
+		return iam.NewMemoryService()
+	case "postgres", "pg":
+		svc, err := iam.NewPostgresService(cfg.Database)
+		if err != nil {
+			panic(fmt.Errorf("initialize postgres IAM service: %w", err))
+		}
+		return svc
+	case "mysql":
+		panic(fmt.Errorf("mysql IAM provider is deprecated and disabled in the unified PostgreSQL stack; set iam.provider=postgres"))
+	default:
+		panic(fmt.Errorf("unsupported iam provider: %s", cfg.IAM.Provider))
+	}
 }
 
 func mustBuildSessionStore(cfg config.Config) session.Store {

@@ -18,6 +18,8 @@ type AuditEvent struct {
 	ActorSubject  string            `json:"actorSubject"`
 	ActorName     string            `json:"actorName,omitempty"`
 	App           string            `json:"app,omitempty"`
+	OrgID         string            `json:"orgId,omitempty"`
+	ProjectID     string            `json:"projectId,omitempty"`
 	ResourceType  string            `json:"resourceType"`
 	ResourceID    string            `json:"resourceId,omitempty"`
 	Action        string            `json:"action"`
@@ -36,6 +38,8 @@ type AuditListRequest struct {
 	TraceID      string `json:"traceId,omitempty"`
 	ActorSubject string `json:"actorSubject,omitempty"`
 	App          string `json:"app,omitempty"`
+	OrgID        string `json:"orgId,omitempty"`
+	ProjectID    string `json:"projectId,omitempty"`
 	ResourceType string `json:"resourceType,omitempty"`
 	ResourceID   string `json:"resourceId,omitempty"`
 	Action       string `json:"action,omitempty"`
@@ -69,5 +73,9 @@ func NewAuditEventFromPrincipal(p *Principal, resourceType, resourceID, action, 
 		event.ActorName = p.Username
 	}
 	event.App = p.App
+	event.OrgID = p.OrgID
+	if len(p.ProjectIDs) > 0 {
+		event.ProjectID = p.ProjectIDs[0]
+	}
 	return event
 }

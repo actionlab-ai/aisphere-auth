@@ -106,7 +106,9 @@ class CasdoorSeedTest(unittest.TestCase):
 
         sql, _, _ = render_seed.render(args)
 
-        self.assertIn("keyMatch(r.sub, p.sub)", sql)
+        self.assertIn("p = sub, obj, act, eft, unused, permissionId", sql)
+        self.assertNotIn("p = sub, obj, act, eft, unused, permission\n", sql)
+        self.assertIn('m = (g(r.sub, p.sub) || r.sub == p.sub || keyMatch(r.sub, p.sub)) && (p.obj == "*" || keyMatch(r.obj, p.obj)) && (p.act == "*" || r.act == p.act)', sql)
         self.assertIn("'perm_aisphere_auth_login'", sql)
         self.assertIn("'[\"aisphere/*\"]'", sql)
         self.assertIn("'[\"aisphere-auth\"]'", sql)

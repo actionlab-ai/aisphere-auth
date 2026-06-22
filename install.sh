@@ -32,7 +32,7 @@ Runtime config options:
   --casdoor-client-id <id>          Casdoor client id
   --casdoor-client-secret <secret>  Casdoor client secret
   --casdoor-redirect-url <url>      Casdoor redirect url
-  --casdoor-permission-id <id>      Casdoor permission id, default: skillhub/platform_permission
+  --casdoor-permission-id <id>      Casdoor permission id, default: aisphere/perm_aihub_admin
   --session-provider <memory|redis> Session provider, default: memory
   --redis-addrs <host:port,...>     Redis addresses when session-provider=redis
   --service-token <token>           Internal service token; generated if omitted
@@ -135,7 +135,7 @@ CASDOOR_APPLICATION="aisphere"
 CASDOOR_CLIENT_ID="change-me"
 CASDOOR_CLIENT_SECRET="change-me"
 CASDOOR_REDIRECT_URL=""
-CASDOOR_PERMISSION_ID="skillhub/platform_permission"
+CASDOOR_PERMISSION_ID="aisphere/perm_aihub_admin"
 SESSION_PROVIDER="memory"
 REDIS_ADDRS="127.0.0.1:6379"
 SERVICE_TOKEN=""

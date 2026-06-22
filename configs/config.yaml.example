@@ -50,7 +50,7 @@ gateway:
   # 单域名部署可留空，由浏览器按当前域名保存 Cookie。
   # 多子域共享登录态时可填写根域，例如 ".example.com"。
   # 示例：
-  #   auth.example.com / skillhub.example.com / agent.example.com 共享时填 ".example.com"。
+  #   auth.example.com / aihub.example.com / agent.example.com 共享时填 ".example.com"。
   # 对应环境变量：AISPHERE_COOKIE_DOMAIN
   cookieDomain: ""
 
@@ -79,13 +79,13 @@ casdoor:
 
   # Casdoor Owner / Organization。
   # 必须和 Casdoor 中 Application、Permission、User 所属 owner 对齐。
-  # 示例：skillhub、built-in、aisphere
+  # 示例：aihub、built-in、aisphere
   # 对应环境变量：AISPHERE_CASDOOR_OWNER
-  owner: "skillhub"
+  owner: "aisphere"
 
   # Casdoor Application 名称。
   # 不是 Client ID，而是 Casdoor 后台 Application 的 name。
-  # 示例：aisphere、skillhub
+  # 示例：aisphere、aihub
   # 对应环境变量：AISPHERE_CASDOOR_APPLICATION
   application: "aisphere"
 
@@ -118,12 +118,12 @@ casdoor:
   # Casdoor Permission ID。
   # 用于 /api/enforce 权限判断。
   # 格式通常为：<owner>/<permissionName>
-  # 示例：skillhub/platform_permission
+  # 示例：aisphere/perm_aihub_admin
   # 对应环境变量：AISPHERE_CASDOOR_PERMISSION_ID
-  permissionId: "skillhub/platform_permission"
+  permissionId: "aisphere/perm_aihub_admin"
 
   # Casdoor 权限主体格式。
-  # 当前推荐 owner-name，最终会生成类似 skillhub/admin 的 subject。
+  # 当前推荐 owner-name，最终会生成类似 aisphere/admin 的 subject。
   # 不建议业务系统自己拼 subject，应统一从 Principal.CasdoorSubject 获取。
   # 对应环境变量：AISPHERE_CASDOOR_SUBJECT_FORMAT
   subjectFormat: "owner-name"
@@ -133,7 +133,7 @@ session:
   # 可选值：memory、redis。
   # memory 只适合本地开发；生产环境必须使用 redis，支持多副本和重启保留。
   # 对应环境变量：AISPHERE_SESSION_PROVIDER
-  provider: "memory"
+  provider: "postgres"
 
   # 浏览器 Cookie 名称。
   # AI Sphere 平台统一推荐 aisphere_session。
@@ -203,6 +203,24 @@ authz:
   # 对应环境变量：AISPHERE_AUTHZ_FAIL_CLOSED
   failClosed: true
 
+# AI Sphere 平台 IAM 模块。Casdoor 继续负责登录/密码/OIDC，
+# 这里负责平台业务组织、项目、组、资源分享授权等数据。
+iam:
+  # memory 仅适合本地调试；postgres 是统一主库，生产和联调统一使用 PostgreSQL。
+  # 对应环境变量：AISPHERE_AUTH_IAM_PROVIDER
+  provider: "postgres"
+
+database:
+  # 当前 IAM 持久化统一使用 PostgreSQL。
+  # 对应环境变量：AISPHERE_AUTH_DATABASE_DRIVER
+  driver: "postgres"
+  # 例：postgres://aisphere_auth:CHANGE_ME@127.0.0.1:5432/aisphere_auth?sslmode=disable
+  # 对应环境变量：AISPHERE_AUTH_DATABASE_DSN
+  dsn: ""
+  autoMigrate: true
+  maxOpenConns: 30
+  maxIdleConns: 10
+
 token:
   # 是否启用 AI Sphere 本地 Token 能力。
   # 当前主要为后续 CLI、AgentRuntime、服务间调用预留。
@@ -218,7 +236,7 @@ token:
 
   # Token audience。
   # 后续 JWT aud 字段会使用该值。
-  # 对应环境变量：AISPHERE_TOKEN_AUDIENCE，环境变量写法：aisphere,skillhub
+  # 对应环境变量：AISPHERE_TOKEN_AUDIENCE，环境变量写法：aisphere,aihub
   audience:
     - "aisphere"
 
@@ -250,7 +268,7 @@ internal:
   serviceTokenHeader: "X-Aisphere-Service-Token"
 
   # 内部服务调用凭证。
-  # SkillHub、AgentRuntime 等服务调用 /authz/check、/auth/sessions/introspect 时必须携带。
+  # AIHub、AgentRuntime 等服务调用 /authz/check、/auth/sessions/introspect 时必须携带。
   # 生产环境必须通过 Secret 注入，不要提交真实值。
   # 当 serviceTokenRequired=true 时，长度必须至少 32 位。
   # 对应环境变量：AISPHERE_SERVICE_TOKEN

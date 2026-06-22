@@ -17,7 +17,7 @@ param(
   [ValidateSet("data-only", "full")]
   [string]$PrepareMode = "data-only",
   [string]$PreparedSql = "",
-  [string]$PrepareKeywords = "aisphere,skillhub",
+  [string]$PrepareKeywords = "aisphere,aihub",
   [switch]$PrepareIncludeUsers,
   [switch]$PrepareOnly,
   [switch]$Seed,

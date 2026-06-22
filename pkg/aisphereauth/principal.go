@@ -2,20 +2,23 @@ package aisphereauth
 
 // Principal is the public SDK view of the current AI Sphere user context.
 type Principal struct {
-	SubjectID      string   `json:"subjectId"`
-	CasdoorSubject string   `json:"casdoorSubject"`
-	Username       string   `json:"username"`
-	DisplayName    string   `json:"displayName,omitempty"`
-	Email          string   `json:"email,omitempty"`
-	Organization   string   `json:"organization"`
-	Roles          []string `json:"roles,omitempty"`
-	Groups         []string `json:"groups,omitempty"`
-	App            string   `json:"app,omitempty"`
-	SessionID      string   `json:"sessionId,omitempty"`
-	TokenID        string   `json:"tokenId,omitempty"`
-	AuthProvider   string   `json:"authProvider"`
-	AuthTimeUnix   int64    `json:"authTimeUnix,omitempty"`
-	ExpiresAtUnix  int64    `json:"expiresAtUnix,omitempty"`
+	SubjectID      string         `json:"subjectId"`
+	CasdoorSubject string         `json:"casdoorSubject"`
+	Username       string         `json:"username"`
+	DisplayName    string         `json:"displayName,omitempty"`
+	Email          string         `json:"email,omitempty"`
+	Organization   string         `json:"organization"`
+	Roles          []string       `json:"roles,omitempty"`
+	Groups         []string       `json:"groups,omitempty"`
+	OrgID          string         `json:"orgId,omitempty"`
+	ProjectIDs     []string       `json:"projectIds,omitempty"`
+	Claims         map[string]any `json:"claims,omitempty"`
+	App            string         `json:"app,omitempty"`
+	SessionID      string         `json:"sessionId,omitempty"`
+	TokenID        string         `json:"tokenId,omitempty"`
+	AuthProvider   string         `json:"authProvider"`
+	AuthTimeUnix   int64          `json:"authTimeUnix,omitempty"`
+	ExpiresAtUnix  int64          `json:"expiresAtUnix,omitempty"`
 }
 
 func (p *Principal) EffectiveSubject() string {

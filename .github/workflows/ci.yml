@@ -19,15 +19,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.23.x'
+          go-version: '1.25.x'
           cache: true
 
       - name: Resolve modules
         shell: bash
         run: |
-          go mod tidy
           go mod download
           go mod verify
 

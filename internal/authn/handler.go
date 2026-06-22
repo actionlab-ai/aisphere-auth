@@ -3,6 +3,7 @@ package authn
 import (
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type Handler struct {
 func NewHandler(cfg config.Config, svc Service) *Handler { return &Handler{cfg: cfg, svc: svc} }
 
 func (h *Handler) Login(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	resp, err := h.svc.LoginURL(c.Request.Context(), LoginURLRequest{App: c.Query("app"), RedirectAfterLogin: c.Query("redirect"), Request: c.Request})
 	if err != nil {
 		slog.Error("auth login failed", "trace_id", httpx.RequestID(c), "error", err)
@@ -70,6 +72,11 @@ func (h *Handler) Me(c *gin.Context) {
 }
 
 func (h *Handler) Logout(c *gin.Context) {
+	logoutURL, err := h.globalLogoutURL(c.Query("redirect"), c.Query("global") == "true")
+	if err != nil {
+		httpx.RespondError(c, http.StatusInternalServerError, "auth_logout_failed", "退出登录失败")
+		return
+	}
 	sessionID, _ := c.Cookie(h.cfg.Session.CookieName)
 	if err := h.svc.Logout(c.Request.Context(), LogoutRequest{SessionID: sessionID, Global: c.Query("global") == "true"}); err != nil {
 		slog.Warn("auth logout failed", "trace_id", httpx.RequestID(c), "error", err)
@@ -77,7 +84,23 @@ func (h *Handler) Logout(c *gin.Context) {
 		return
 	}
 	h.clearSessionCookie(c)
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "logout_url": logoutURL})
+}
+
+func (h *Handler) globalLogoutURL(redirect string, global bool) (string, error) {
+	if !global {
+		return "", nil
+	}
+	u, err := url.Parse(strings.TrimRight(h.cfg.Casdoor.Endpoint, "/") + "/logout")
+	if err != nil {
+		return "", err
+	}
+	if redirect = normalizeRedirect(redirect, ""); redirect != "" {
+		q := u.Query()
+		q.Set("post_logout_redirect_uri", redirect)
+		u.RawQuery = q.Encode()
+	}
+	return u.String(), nil
 }
 
 func (h *Handler) Introspect(c *gin.Context) {

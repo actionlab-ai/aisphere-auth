@@ -19,9 +19,9 @@ func TestHTTPClientSendsServiceToken(t *testing.T) {
 			"active": true,
 			"principal": map[string]any{
 				"subjectId":      "human:test",
-				"casdoorSubject": "skillhub/test",
+				"casdoorSubject": "aihub/test",
 				"username":       "test",
-				"organization":   "skillhub",
+				"organization":   "aihub",
 				"authProvider":   "casdoor",
 			},
 		})
@@ -29,7 +29,7 @@ func TestHTTPClientSendsServiceToken(t *testing.T) {
 	defer srv.Close()
 
 	c := NewHTTPClient(srv.URL, WithServiceToken("secret"))
-	_, err := c.Introspect(context.Background(), "sess_test", "skillhub")
+	_, err := c.Introspect(context.Background(), "sess_test", "aihub")
 	if err != nil {
 		t.Fatalf("introspect failed: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestHTTPClientSupportsCustomServiceTokenHeader(t *testing.T) {
 	defer srv.Close()
 
 	c := NewHTTPClient(srv.URL, WithServiceToken("secret"), WithServiceTokenHeader("X-Custom-Service-Token"))
-	_, err := c.Check(context.Background(), CheckRequest{Subject: "skillhub/test", Object: "skillhub:skill:*", Action: "read"})
+	_, err := c.Check(context.Background(), CheckRequest{Subject: "aihub/test", Object: "aihub:skill:*", Action: "read"})
 	if err != nil {
 		t.Fatalf("check failed: %v", err)
 	}
@@ -68,8 +68,8 @@ func TestHTTPClientWriteAndListAudit(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(aisphereauth.AuditEvent{ID: "evt_1", ActorSubject: "aisphere/admin", ResourceType: "skill", Action: "skill.create", Result: aisphereauth.AuditResultSuccess})
 		case r.Method == http.MethodGet && r.URL.Path == "/audit/events":
 			gotListToken = r.Header.Get("X-Aisphere-Service-Token")
-			if r.URL.Query().Get("app") != "skillhub" {
-				t.Fatalf("expected app query skillhub, got %q", r.URL.Query().Get("app"))
+			if r.URL.Query().Get("app") != "aihub" {
+				t.Fatalf("expected app query aihub, got %q", r.URL.Query().Get("app"))
 			}
 			_ = json.NewEncoder(w).Encode(aisphereauth.AuditListResponse{Items: []aisphereauth.AuditEvent{{ID: "evt_1"}}, Total: 1, Limit: 10})
 		default:
@@ -86,7 +86,7 @@ func TestHTTPClientWriteAndListAudit(t *testing.T) {
 	if event.ID != "evt_1" {
 		t.Fatalf("expected audit event id evt_1, got %q", event.ID)
 	}
-	resp, err := c.ListAudit(context.Background(), aisphereauth.AuditListRequest{App: "skillhub", Limit: 10})
+	resp, err := c.ListAudit(context.Background(), aisphereauth.AuditListRequest{App: "aihub", Limit: 10})
 	if err != nil {
 		t.Fatalf("list audit failed: %v", err)
 	}

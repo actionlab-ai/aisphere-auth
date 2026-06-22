@@ -24,7 +24,7 @@ MODEL_TEXT = """[request_definition]
 r = sub, obj, act
 
 [policy_definition]
-p = sub, obj, act
+p = sub, obj, act, eft, unused, permissionId
 
 [role_definition]
 g = _, _
@@ -33,9 +33,7 @@ g = _, _
 e = some(where (p.eft == allow))
 
 [matchers]
-m = (g(r.sub, p.sub) || r.sub == p.sub || keyMatch(r.sub, p.sub)) &&
-    (p.obj == "*" || keyMatch(r.obj, p.obj)) &&
-    (p.act == "*" || r.act == p.act)"""
+m = (g(r.sub, p.sub) || r.sub == p.sub || keyMatch(r.sub, p.sub)) && (p.obj == "*" || keyMatch(r.obj, p.obj)) && (p.act == "*" || r.act == p.act)"""
 
 SCOPE_ITEMS = [
     {
@@ -125,9 +123,9 @@ COMMON_ROLES = [
     ("role_audit_admin", "审计管理员", "可查询所有平台审计记录"),
     ("role_audit_viewer", "审计只读", "可只读查询平台审计记录"),
     ("role_security_admin", "安全管理员", "可管理认证、授权、审计相关配置"),
-    ("role_skillhub_admin", "SkillHub 管理员", "SkillHub 全部管理权限"),
-    ("role_skillhub_editor", "SkillHub 编辑者", "SkillHub 技能、分组、发布、提案等写入权限"),
-    ("role_skillhub_viewer", "SkillHub 只读", "SkillHub 只读权限"),
+    ("role_aihub_admin", "AIHub 管理员", "AIHub 全部管理权限"),
+    ("role_aihub_editor", "AIHub 编辑者", "AIHub 技能、SkillSet、Agent、Workflow、发布、提案等写入权限"),
+    ("role_aihub_viewer", "AIHub 只读", "AIHub 只读权限"),
     ("role_agentruntime_admin", "AgentRuntime 管理员", "AgentRuntime 全部管理权限"),
     ("role_agentruntime_operator", "AgentRuntime 操作者", "AgentRuntime 运行、停止、查看权限"),
     ("role_agentruntime_viewer", "AgentRuntime 只读", "AgentRuntime 只读权限"),
@@ -144,22 +142,26 @@ COMMON_ROLES = [
 
 COMMON_PERMISSIONS = [
     ("perm_platform_admin", "平台管理员策略", ["role_platform_admin"], ["*"], ["*"]),
-    ("perm_platform_viewer", "平台只读策略", ["role_platform_viewer"], ["portal:*", "skillhub:*", "agentruntime:*", "sqlhub:*", "modelgateway:*", "audit:*"], ["read", "view", "list", "admin:read"]),
+    ("perm_platform_viewer", "平台只读策略", ["role_platform_viewer"], ["portal:*", "aihub:*", "agentruntime:*", "sqlhub:*", "modelgateway:*", "audit:*"], ["read", "view", "list", "admin:read"]),
     ("perm_audit_admin", "审计管理策略", ["role_audit_admin", "role_security_admin"], ["audit:*", "*:audit:*"], ["*"]),
     ("perm_audit_viewer", "审计只读策略", ["role_audit_viewer"], ["audit:*", "*:audit:*"], ["read", "view", "list"]),
     ("perm_security_admin", "安全管理策略", ["role_security_admin"], ["auth:*", "authn:*", "authz:*", "audit:*", "casdoor:*"], ["*"]),
 
-    ("perm_skillhub_admin", "SkillHub 管理策略", ["role_skillhub_admin"], ["skillhub:*"], ["*"]),
-    ("perm_skillhub_editor", "SkillHub 编辑策略", ["role_skillhub_editor"], [
-        "skillhub:skill:*",
-        "skillhub:group:*",
-        "skillhub:proposal:*",
-        "skillhub:release:*",
-        "skillhub:knowledge:*",
-        "skillhub:workflow:*",
-        "skillhub:audit:*",
-    ], ["read", "view", "list", "write", "create", "update", "delete", "publish", "rollback", "approve", "reject", "admin:read", "admin:write"]),
-    ("perm_skillhub_viewer", "SkillHub 只读策略", ["role_skillhub_viewer"], ["skillhub:*"], ["read", "view", "list", "admin:read"]),
+    ("perm_aihub_admin", "AIHub 管理策略", ["role_aihub_admin"], ["aihub:*"], ["*"]),
+    ("perm_aihub_editor", "AIHub 编辑策略", ["role_aihub_editor"], [
+        "aihub:skill:*",
+        "aihub:skillset:*",
+        "aihub:agent:*",
+        "aihub:tool:*",
+        "aihub:workflow:*",
+        "aihub:run:*",
+        "aihub:proposal:*",
+        "aihub:release:*",
+        "aihub:knowledge:*",
+        "aihub:audit:*",
+        "aihub:runtime:*",
+    ], ["read", "view", "list", "download", "write", "create", "update", "delete", "publish", "rollback", "approve", "reject", "run", "cancel", "retry", "report", "admin:read", "admin:write"]),
+    ("perm_aihub_viewer", "AIHub 只读策略", ["role_aihub_viewer"], ["aihub:*"], ["read", "view", "list", "download", "admin:read"]),
 
     ("perm_agentruntime_admin", "AgentRuntime 管理策略", ["role_agentruntime_admin"], ["agentruntime:*"], ["*"]),
     ("perm_agentruntime_operator", "AgentRuntime 操作策略", ["role_agentruntime_operator"], ["agentruntime:run:*", "agentruntime:session:*", "agentruntime:agent:*", "agentruntime:tool:*", "agentruntime:audit:*"], ["read", "view", "list", "run", "stop", "restart", "approve", "reject", "admin:read"]),
@@ -204,6 +206,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-admin-user-create", action="store_true", help="Do not create/update bootstrap admin user row")
     parser.add_argument("--skip-admin-binding", action="store_true", help="Do not bind admin user to role_platform_admin")
     parser.add_argument("--admin-user-only", action="store_true", help="Render only bootstrap admin user and role binding; do not touch application/client secret")
+    parser.add_argument("--clean-legacy", dest="clean_legacy", action="store_true", default=True, help="Delete/rename legacy SkillHub permission data before writing AIHub policies. Default: enabled")
+    parser.add_argument("--no-clean-legacy", dest="clean_legacy", action="store_false", help="Keep legacy SkillHub permission data")
     parser.add_argument("--created-time", default="", help="Fixed Casdoor created_time. Default: current UTC ISO time")
     return parser.parse_args()
 
@@ -261,6 +265,59 @@ def render_platform_admin_role_insert(args: argparse.Namespace, created_time: st
         ["owner", "name", "created_time", "display_name", "description", "users", "groups", "roles", "domains", "is_enabled"],
         [sql_quote(args.org), sql_quote(name), sql_quote(created_time), sql_quote(display_name), sql_quote(desc), sql_json([admin_subject]), sql_json([]), sql_json([]), sql_json([]), "1"],
     )
+
+
+LEGACY_SKILLHUB_ROLES = [
+    ("role_skillhub_admin", "role_aihub_admin", "AIHub 管理员", "AIHub 全部管理权限"),
+    ("role_skillhub_editor", "role_aihub_editor", "AIHub 编辑者", "AIHub 技能、SkillSet、Agent、Workflow、发布、提案等写入权限"),
+    ("role_skillhub_viewer", "role_aihub_viewer", "AIHub 只读", "AIHub 只读权限"),
+]
+
+LEGACY_SKILLHUB_PERMISSIONS = [
+    "perm_skillhub_admin",
+    "perm_skillhub_editor",
+    "perm_skillhub_viewer",
+]
+
+
+def render_clean_legacy_sql(args: argparse.Namespace) -> list[str]:
+    """Return SQL that removes the old SkillHub policy model.
+
+    Test environments are allowed to be destructive. We still rename legacy roles
+    into the new AIHub role names when possible so existing user bindings stored
+    in Casdoor's role.users JSON are not lost.
+    """
+    org = args.org
+    lines: list[str] = [
+        "",
+        "-- 0. Clean legacy SkillHub authorization data; AIHub is the only canonical app/resource prefix.",
+        "--    Disable with --no-clean-legacy if you need a temporary dual-stack import.",
+    ]
+    for old_name, new_name, display_name, desc in LEGACY_SKILLHUB_ROLES:
+        lines.append(
+            "UPDATE `role` SET "
+            f"`name`={sql_quote(new_name)}, `display_name`={sql_quote(display_name)}, `description`={sql_quote(desc)} "
+            f"WHERE `owner`={sql_quote(org)} AND `name`={sql_quote(old_name)} "
+            "AND NOT EXISTS (SELECT 1 FROM (SELECT 1 FROM `role` "
+            f"WHERE `owner`={sql_quote(org)} AND `name`={sql_quote(new_name)} LIMIT 1) AS existing_role);"
+        )
+    old_role_ids = [role_id(org, old) for old, *_ in LEGACY_SKILLHUB_ROLES]
+    old_perm_ids = [permission_id(org, name) for name in LEGACY_SKILLHUB_PERMISSIONS]
+    lines.append(
+        "DELETE FROM `permission_rule` WHERE "
+        "`v0` IN (" + ", ".join(sql_quote(x) for x in old_role_ids) + ") "
+        "OR `v1` LIKE 'skillhub:%' OR `v1` LIKE 'skill:%' OR `v1` LIKE 'group:%' "
+        "OR `v5` IN (" + ", ".join(sql_quote(x) for x in old_perm_ids) + ");"
+    )
+    lines.append(
+        "DELETE FROM `permission` WHERE `owner`=" + sql_quote(org) + " AND `name` IN (" + ", ".join(sql_quote(x) for x in LEGACY_SKILLHUB_PERMISSIONS) + ");"
+    )
+    # If a new AIHub role already existed, the old SkillHub rows cannot be renamed
+    # because of the unique key, so remove the stale duplicates after the attempted rename.
+    lines.append(
+        "DELETE FROM `role` WHERE `owner`=" + sql_quote(org) + " AND `name` IN (" + ", ".join(sql_quote(old) for old, *_ in LEGACY_SKILLHUB_ROLES) + ");"
+    )
+    return lines
 
 
 def iter_permission_specs(args: argparse.Namespace):
@@ -357,6 +414,9 @@ def render(args: argparse.Namespace) -> tuple[str, str, list[str]]:
         lines.extend(["", "-- 3. Bootstrap admin user"])
         lines.append(render_admin_user_insert(args, created_time, password_hash, password_type))
 
+    if getattr(args, "clean_legacy", True):
+        lines.extend(render_clean_legacy_sql(args))
+
     lines.extend(["", "-- 4. Casbin model"])
     lines.append(insert_on_duplicate(
         "model",
@@ -367,10 +427,14 @@ def render(args: argparse.Namespace) -> tuple[str, str, list[str]]:
     lines.extend(["", "-- 5. Roles and role-user bindings"])
     for name, display_name, desc in COMMON_ROLES:
         users = [admin_subject] if (name == "role_platform_admin" and not args.skip_admin_binding) else []
+        update_columns = ["created_time", "display_name", "description", "groups", "roles", "domains", "is_enabled"]
+        if name == "role_platform_admin" and not args.skip_admin_binding:
+            update_columns.insert(3, "users")
         lines.append(insert_on_duplicate(
             "role",
             ["owner", "name", "created_time", "display_name", "description", "users", "groups", "roles", "domains", "is_enabled"],
             [sql_quote(args.org), sql_quote(name), sql_quote(created_time), sql_quote(display_name), sql_quote(desc), sql_json(users), sql_json([]), sql_json([]), sql_json([]), "1"],
+            update_columns=update_columns,
         ))
 
     lines.extend(["", "-- 6. Permissions / policies"])
